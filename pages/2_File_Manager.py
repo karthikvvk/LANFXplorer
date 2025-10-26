@@ -1,27 +1,26 @@
 import streamlit as st
 import paramiko
 import requests
+import os
 import tkinter as tk
 from tkinter import filedialog
-import os
 import multiprocessing
 
+# ✅ Load from session
+if "REMOTE_HOST" not in st.session_state:
+    st.warning("Please select a host first.")
+    st.switch_page("pages/1_Select_Host.py")
 
-
-# ---------- Remote connection details ----------
-REMOTE_HOST = "192.168.0.104"
+REMOTE_HOST = st.session_state.REMOTE_HOST
+REMOTE_PASS = st.session_state.remote_pass
 FLASK_BACKEND = "http://192.168.0.101:5000"
-REMOTE_PASS = ""
-# ---------- Initialize Session State ----------
-if "remote_user" not in st.session_state:
-    val = requests.get(f"{FLASK_BACKEND}/connect")
-    os_type, username = val.json().get("os"), val.json().get("user")
+os_type = st.session_state.selected_os
+username = st.session_state.remote_user
 
-    st.session_state.remote_user = username
-    st.session_state.os_type = os_type
-    st.session_state.remote_pass = "1970"
 
-    # Manual OS-based path setup
+# Manual OS-based path setup
+# ---------- Initialize working directory only once ----------
+if "pwd" not in st.session_state:
     if os_type == "windows":
         st.session_state.pwd = f"C:\\Users\\{username}\\"
         st.session_state.path_sep = "\\"
@@ -29,10 +28,11 @@ if "remote_user" not in st.session_state:
         st.session_state.pwd = f"/home/{username}/"
         st.session_state.path_sep = "/"
 
+
 # ---------- Ensure path_sep exists ----------
 if "path_sep" not in st.session_state:
-    if "os_type" in st.session_state:
-        st.session_state.path_sep = "\\" if st.session_state.os_type == "windows" else "/"
+    if "selected_os" in st.session_state:
+        st.session_state.path_sep = "\\" if st.session_state.selected_os == "windows" else "/"
     else:
         st.session_state.path_sep = "/"
 
@@ -73,7 +73,7 @@ def list_remote_files(directory):
         )
 
         # Choose OS-appropriate command
-        if st.session_state.os_type == "windows":
+        if st.session_state.selected_os == "windows":
             cmd = f'cd "{directory}" && dir /B'
         else:
             cmd = f'cd "{directory}" && ls -1'
@@ -142,7 +142,7 @@ dest_path_input = st.text_input("Destination path (for Copy/Move):", key="dest")
 def resolve_destination(dest_path):
     """Resolve relative to current PWD if not absolute."""
     sep = st.session_state.path_sep
-    os_type = st.session_state.os_type
+    os_type = st.session_state.selected_os
 
     if not dest_path:
         return ""
@@ -242,22 +242,19 @@ else:
     is_folder = True
 
 
-def _select(q):
-    root = tk.Tk()
-    root.withdraw()
-    folder = filedialog.askdirectory(title="Select Local Destination Folder")
-    q.put(folder)
-    root.destroy()
+
 
 
 def pick_local_folder():
-    """Open a native folder picker in a separate process to avoid Streamlit thread crashes."""
-    ctx = multiprocessing.get_context("spawn")
-    q = ctx.Queue()
-    p = ctx.Process(target=_select, args=(q,))
-    p.start()
-    p.join()
-    return q.get() if not q.empty() else None
+    """Ask Flask backend to open a folder picker dialog and return path."""
+    try:
+        resp = requests.get(f"{FLASK_BACKEND}/selectdest", timeout=120)
+        data = resp.json()
+        return data.get("selected")
+    except Exception as e:
+        st.error(f"Failed to select destination: {e}")
+        return None
+
 
 
 # ---------- Copy to This PC (Pure SSH method) ----------
@@ -281,7 +278,7 @@ if st.button("📥 Copy to This PC"):
             if is_folder and not os.path.exists(local_target):
                 os.makedirs(local_target, exist_ok=True)
 
-            if st.session_state.os_type == "windows":
+            if st.session_state.selected_os == "windows":
                 # PowerShell recursive copy for folder
                 if is_folder:
                     cmd = (
@@ -301,7 +298,7 @@ if st.button("📥 Copy to This PC"):
             stdin, stdout, stderr = ssh.exec_command(cmd)
 
             if is_folder:
-                if st.session_state.os_type == "windows":
+                if st.session_state.selected_os == "windows":
                     # Windows folder copy is streamed as bytes—recreate files locally
                     st.error("⚠️ Recursive folder streaming is not supported natively on Windows SSH yet.")
                 else:
