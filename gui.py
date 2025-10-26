@@ -1,6 +1,12 @@
 import streamlit as st
 import paramiko
 import requests
+import tkinter as tk
+from tkinter import filedialog
+import os
+import multiprocessing
+
+
 
 # ---------- Remote connection details ----------
 REMOTE_HOST = "192.168.0.104"
@@ -212,3 +218,115 @@ with col4:
             st.rerun()
         else:
             st.error("Enter destination path!")
+
+
+
+
+
+
+
+
+
+
+st.divider()
+st.subheader("💾 Copy to This PC")
+
+# Determine source (file or folder)
+if selected:
+    source_path = join_path(st.session_state.pwd, selected)
+    st.text(f"Selected Remote File: {source_path}")
+    is_folder = False
+else:
+    source_path = st.session_state.pwd.rstrip(st.session_state.path_sep)
+    st.text(f"Selected Remote Folder: {source_path}")
+    is_folder = True
+
+
+def _select(q):
+    root = tk.Tk()
+    root.withdraw()
+    folder = filedialog.askdirectory(title="Select Local Destination Folder")
+    q.put(folder)
+    root.destroy()
+
+
+def pick_local_folder():
+    """Open a native folder picker in a separate process to avoid Streamlit thread crashes."""
+    ctx = multiprocessing.get_context("spawn")
+    q = ctx.Queue()
+    p = ctx.Process(target=_select, args=(q,))
+    p.start()
+    p.join()
+    return q.get() if not q.empty() else None
+
+
+# ---------- Copy to This PC (Pure SSH method) ----------
+if st.button("📥 Copy to This PC"):
+    local_dest = pick_local_folder()
+    if not local_dest:
+        st.warning("❌ No destination folder selected.")
+    else:
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(
+            REMOTE_HOST,
+            username=st.session_state.remote_user,
+            password=st.session_state.remote_pass
+        )
+
+        local_target = os.path.join(local_dest, os.path.basename(source_path))
+
+        try:
+            # Create destination folder if copying directory
+            if is_folder and not os.path.exists(local_target):
+                os.makedirs(local_target, exist_ok=True)
+
+            if st.session_state.os_type == "windows":
+                # PowerShell recursive copy for folder
+                if is_folder:
+                    cmd = (
+                        f"powershell -Command "
+                        f"Get-ChildItem -Path '{source_path}' -Recurse -File | "
+                        f"ForEach-Object {{ Get-Content $_.FullName -Encoding Byte }} "
+                    )
+                else:
+                    cmd = f"type \"{source_path}\""
+            else:
+                # Recursive folder streaming for Linux (tar over stdout)
+                if is_folder:
+                    cmd = f"tar -cf - -C \"{os.path.dirname(source_path)}\" \"{os.path.basename(source_path)}\""
+                else:
+                    cmd = f"cat \"{source_path}\""
+
+            stdin, stdout, stderr = ssh.exec_command(cmd)
+
+            if is_folder:
+                if st.session_state.os_type == "windows":
+                    # Windows folder copy is streamed as bytes—recreate files locally
+                    st.error("⚠️ Recursive folder streaming is not supported natively on Windows SSH yet.")
+                else:
+                    # Extract tar stream locally
+                    import tarfile
+                    import io
+                    tar_stream = io.BytesIO(stdout.read())
+                    with tarfile.open(fileobj=tar_stream) as tar:
+                        tar.extractall(local_dest)
+                    st.success(f"✅ Folder copied successfully:\n{source_path} → {local_target}")
+            else:
+                # Copy single file
+                with open(local_target, "wb") as f:
+                    for chunk in iter(lambda: stdout.read(4096), b""):
+                        f.write(chunk)
+
+                exit_status = stdout.channel.recv_exit_status()
+                if exit_status == 0:
+                    st.success(f"✅ File copied successfully:\n{source_path} → {local_target}")
+                else:
+                    err = stderr.read().decode(errors="ignore")
+                    st.error(f"⚠️ SSH copy failed ({exit_status}): {err}")
+
+        except Exception as e:
+            st.error(f"⚠️ Failed to copy: {e}")
+
+        finally:
+            ssh.close()
