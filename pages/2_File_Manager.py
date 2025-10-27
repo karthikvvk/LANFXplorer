@@ -327,3 +327,32 @@ if st.button("📥 Copy to This PC"):
 
         finally:
             ssh.close()
+
+
+
+
+# ------------------------ COPY FROM THIS PC ------------------------
+st.divider()
+st.subheader("📤 Copy from This PC")
+
+uploaded_file = st.file_uploader("Select file", type=None, label_visibility="collapsed")
+
+if uploaded_file is not None:
+    st.success(f"Selected: {uploaded_file.name}")
+    st.text(f"Current Remote Path: {st.session_state.pwd}")
+
+    if st.button("📤 Copy to Remote"):
+        try:
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(REMOTE_HOST, username=username, password=REMOTE_PASS)
+
+            sftp = ssh.open_sftp()
+            remote_dest = join_path(st.session_state.pwd, uploaded_file.name)
+            with sftp.file(remote_dest, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            sftp.close()
+            ssh.close()
+            st.success(f"✅ Uploaded {uploaded_file.name} → {remote_dest}")
+        except Exception as e:
+            st.error(f"Upload failed: {e}")
