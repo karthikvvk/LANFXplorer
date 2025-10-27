@@ -1,0 +1,5 @@
+dump/
+.json
+.env
+.txt
+__pycache__/

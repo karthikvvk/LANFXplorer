@@ -11,10 +11,7 @@ import multiprocessing
 
 
 app = Flask(__name__)
-
-REMOTE_HOST = "192.168.0.104"
-REMOTE_PASS = "1970"
-REMOTE_BASE_DIR = "C:\\Users\\Muruga\\"  # Base directory (manual path, no os.path)
+ # Base directory (manual path, no os.path)
 IS_REMOTE = True
 ssh_client = None
 HOST_FILE = "host_list.json"
@@ -217,6 +214,7 @@ def copy_file():
 
     status, out, err = run_remote_command(command)
     return jsonify({"status": status, "output": out, "error": err})
+
 
 
 # ---------- MOVE ----------

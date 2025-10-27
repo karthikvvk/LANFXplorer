@@ -2,12 +2,38 @@ import streamlit as st
 import requests
 import json
 from pathlib import Path
+import subprocess
 
 
 st.set_page_config(page_title="Select Host", layout="centered")
 
-FLASK_BACKEND = "http://192.168.0.101:5000"
+try:
+    # Run the command in the shell
+    result = subprocess.run(
+        "ip route get 1.1.1.1 | awk '{print $7; exit}'",
+        capture_output=True,
+        text=True,
+        shell=True  # important for pipelines
+    )
+    ip = result.stdout.strip()
+except Exception as e:
+    pass
+try:
+    # Run ipconfig and capture output
+    result = subprocess.run(["ipconfig"], capture_output=True, text=True)
+    # Iterate over lines containing 'IPv4'
+    for line in result.stdout.splitlines():
+        if "IPv4" in line:
+            # Split by spaces/dots and take last 4 parts
+            ip_parts = line.split()[-1].split(".")[-4:]
+            ip = ".".join(ip_parts)
+            # print(ip)
+except:
+    pass
 
+FLASK_BACKEND = "http://" + ip + ":5000"
+print(FLASK_BACKEND)
+st.session_state.ip = FLASK_BACKEND
 st.title("🌐 Network Hosts")
 st.write("Select a host to connect:")
 
@@ -15,7 +41,7 @@ st.write("Select a host to connect:")
 @st.cache_data(show_spinner=True)
 def get_host_list():
     try:
-        response = requests.get(f"{FLASK_BACKEND}/lsithost", timeout=30)
+        response = requests.get(f"{FLASK_BACKEND}/lsithost", timeout=100)
         return response.json()
     except Exception as e:
         st.error(f"Failed to fetch host list: {e}")

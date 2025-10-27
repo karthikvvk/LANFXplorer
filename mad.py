@@ -3,7 +3,7 @@ import subprocess
 
 def gethostlist():
     for i in range(10):
-        os.system("arp-scan --interface=wlan0 --localnet | awk '/^[0-9]+\./{print $1}' >> ips.txt")
+        os.system("arp-scan --interface=enp0s13f0u1 --localnet | awk '/^[0-9]+\./{print $1}' >> ips.txt")
 
 
     fh = open("ips.txt", "r")
@@ -13,7 +13,7 @@ def gethostlist():
     for line in lines:
         unique_ips.add(line.strip())
 
-
+    print(unique_ips)
     ssh_open_ips = []
 
     for ip in unique_ips:
@@ -31,6 +31,7 @@ def gethostlist():
         )
         if check.returncode == 0:
             ssh_open_ips.append(ip)
-
+    print(ssh_open_ips)
     return ssh_open_ips
 
+# print(gethostlist())

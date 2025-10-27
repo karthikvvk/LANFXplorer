@@ -13,7 +13,7 @@ if "REMOTE_HOST" not in st.session_state:
 
 REMOTE_HOST = st.session_state.REMOTE_HOST
 REMOTE_PASS = st.session_state.remote_pass
-FLASK_BACKEND = "http://192.168.0.101:5000"
+FLASK_BACKEND = st.session_state.ip
 os_type = st.session_state.selected_os
 username = st.session_state.remote_user
 
