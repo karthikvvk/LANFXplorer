@@ -3,7 +3,7 @@ import paramiko
 import requests
 import getpass
 import platform
-from mad import gethostlist
+from scanner import gethostlist
 import json
 import tkinter as tk
 from tkinter import filedialog
