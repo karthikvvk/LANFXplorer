@@ -1,8 +1,14 @@
 # scanner_ping_threaded.py
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dotenv import load_dotenv
+import os
 
-BASE = "172.18.0."
+load_dotenv()
+BASE = os.getenv("DEFAULTIP", "172.18.0.2")
+cidr = os.getenv("CIDAR", "16")
+gateway = os.getenv("GATEWAY", "172.18.0.1")
+scanner_ip = os.getenv("SCANNER", "172.18.0.200")
 THREADS = 5
 START = 1
 END = 254  # inclusive
