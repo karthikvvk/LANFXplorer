@@ -6,7 +6,6 @@ import tkinter as tk
 from tkinter import filedialog
 import multiprocessing
 
-# ✅ Load from session
 if "REMOTE_HOST" not in st.session_state:
     st.warning("Please select a host first.")
     st.switch_page("pages/1_Select_Host.py")
@@ -18,8 +17,6 @@ os_type = st.session_state.selected_os
 username = st.session_state.remote_user
 
 
-# Manual OS-based path setup
-# ---------- Initialize working directory only once ----------
 if "pwd" not in st.session_state:
     if os_type == "windows":
         st.session_state.pwd = f"C:\\Users\\{username}\\"
@@ -27,9 +24,6 @@ if "pwd" not in st.session_state:
     else:
         st.session_state.pwd = f"/home/{username}/"
         st.session_state.path_sep = "/"
-
-
-# ---------- Ensure path_sep exists ----------
 if "path_sep" not in st.session_state:
     if "selected_os" in st.session_state:
         st.session_state.path_sep = "\\" if st.session_state.selected_os == "windows" else "/"
@@ -40,17 +34,16 @@ if "selected_item" not in st.session_state:
     st.session_state.selected_item = None
 
 
-# ---------- Helper: Path Join ----------
+
+
 def join_path(base, name):
-    """Manually join paths depending on OS type (no os.path)."""
+
     sep = st.session_state.path_sep
-    base = base.rstrip("\\/")  # remove trailing slashes
+    base = base.rstrip("\\/")
     return base + sep + name
 
 
-# ---------- Helper: Get Parent Directory ----------
 def get_parent_path(path):
-    """Return parent directory manually based on separator."""
     sep = st.session_state.path_sep
     parts = path.rstrip(sep).split(sep)
     if len(parts) > 1:
@@ -60,7 +53,6 @@ def get_parent_path(path):
     return parent
 
 
-# ---------- Function to list remote directory ----------
 def list_remote_files(directory):
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -71,13 +63,10 @@ def list_remote_files(directory):
             username=st.session_state.remote_user,
             password=st.session_state.remote_pass
         )
-
-        # Choose OS-appropriate command
         if st.session_state.selected_os == "windows":
             cmd = f'cd "{directory}" && dir /B'
         else:
             cmd = f'cd "{directory}" && ls -1'
-
         stdin, stdout, stderr = ssh.exec_command(cmd)
         output = stdout.read().decode(errors="ignore").splitlines()
     finally:
@@ -86,19 +75,13 @@ def list_remote_files(directory):
     return output
 
 
-# ---------- Streamlit UI ----------
 st.set_page_config(page_title="Remote File Manager", layout="wide")
 st.title("📂 Remote File Manager")
-
 st.subheader("Connection Info")
 st.text(f"Connected to: {st.session_state.remote_user}@{REMOTE_HOST}")
 st.text(f"Current Path: {st.session_state.pwd}")
-
 st.divider()
-
-# ---------- Directory Navigation ----------
 col_nav1, col_nav2 = st.columns([1, 6])
-
 with col_nav1:
     if st.button("⬅️ Up"):
         parent = get_parent_path(st.session_state.pwd)
@@ -109,8 +92,6 @@ with col_nav1:
 
 with col_nav2:
     st.write("### Current Directory Listing")
-
-# ---------- Directory Listing ----------
 try:
     files = list_remote_files(st.session_state.pwd)
     sep = st.session_state.path_sep
@@ -118,12 +99,12 @@ try:
     for f in files:
         full_path = join_path(st.session_state.pwd, f)
 
-        if "." not in f:  # folder
+        if "." not in f:
             if st.button(f"📁 {f}", key=f"folder_{f}"):
                 st.session_state.pwd = full_path
                 st.session_state.selected_item = None
                 st.rerun()
-        else:  # file
+        else:
             if st.button(f"📄 {f}", key=f"file_{f}"):
                 st.session_state.selected_item = f
                 st.success(f"Selected: {f}")
@@ -133,27 +114,22 @@ except Exception as e:
 
 st.divider()
 st.subheader("File Operations")
-
 filename = st.text_input("Enter filename:", value=st.session_state.selected_item or "")
 dest_path_input = st.text_input("Destination path (for Copy/Move):", key="dest")
 
 
-# ---------- Normalize destination ----------
 def resolve_destination(dest_path):
-    """Resolve relative to current PWD if not absolute."""
     sep = st.session_state.path_sep
     os_type = st.session_state.selected_os
 
     if not dest_path:
         return ""
 
-    # Detect absolute path manually
     if os_type == "windows":
         is_abs = (":" in dest_path) or dest_path.startswith("\\")
     else:
         is_abs = dest_path.startswith("/")
 
-    # Join manually if not absolute
     if not is_abs:
         if st.session_state.pwd.endswith(sep):
             dest_path = st.session_state.pwd + dest_path
@@ -163,7 +139,6 @@ def resolve_destination(dest_path):
     return dest_path
 
 
-# ---------- Operation Buttons ----------
 col1, col2, col3, col4 = st.columns(4)
 selected = st.session_state.selected_item
 disabled_ops = selected is None
@@ -230,8 +205,6 @@ with col4:
 
 st.divider()
 st.subheader("💾 Copy to This PC")
-
-# Determine source (file or folder)
 if selected:
     source_path = join_path(st.session_state.pwd, selected)
     st.text(f"Selected Remote File: {source_path}")
@@ -246,7 +219,6 @@ else:
 
 
 def pick_local_folder():
-    """Ask Flask backend to open a folder picker dialog and return path."""
     try:
         resp = requests.get(f"{FLASK_BACKEND}/selectdest", timeout=120)
         data = resp.json()
@@ -257,7 +229,6 @@ def pick_local_folder():
 
 
 
-# ---------- Copy to This PC (Pure SSH method) ----------
 if st.button("📥 Copy to This PC"):
     local_dest = pick_local_folder()
     if not local_dest:
@@ -274,12 +245,10 @@ if st.button("📥 Copy to This PC"):
         local_target = os.path.join(local_dest, os.path.basename(source_path))
 
         try:
-            # Create destination folder if copying directory
             if is_folder and not os.path.exists(local_target):
                 os.makedirs(local_target, exist_ok=True)
 
             if st.session_state.selected_os == "windows":
-                # PowerShell recursive copy for folder
                 if is_folder:
                     cmd = (
                         f"powershell -Command "
@@ -289,7 +258,6 @@ if st.button("📥 Copy to This PC"):
                 else:
                     cmd = f"type \"{source_path}\""
             else:
-                # Recursive folder streaming for Linux (tar over stdout)
                 if is_folder:
                     cmd = f"tar -cf - -C \"{os.path.dirname(source_path)}\" \"{os.path.basename(source_path)}\""
                 else:
@@ -299,10 +267,8 @@ if st.button("📥 Copy to This PC"):
 
             if is_folder:
                 if st.session_state.selected_os == "windows":
-                    # Windows folder copy is streamed as bytes—recreate files locally
                     st.error("⚠️ Recursive folder streaming is not supported natively on Windows SSH yet.")
                 else:
-                    # Extract tar stream locally
                     import tarfile
                     import io
                     tar_stream = io.BytesIO(stdout.read())
@@ -310,7 +276,6 @@ if st.button("📥 Copy to This PC"):
                         tar.extractall(local_dest)
                     st.success(f"✅ Folder copied successfully:\n{source_path} → {local_target}")
             else:
-                # Copy single file
                 with open(local_target, "wb") as f:
                     for chunk in iter(lambda: stdout.read(4096), b""):
                         f.write(chunk)
@@ -331,7 +296,6 @@ if st.button("📥 Copy to This PC"):
 
 
 
-# ------------------------ COPY FROM THIS PC ------------------------
 st.divider()
 st.subheader("📤 Copy from This PC")
 

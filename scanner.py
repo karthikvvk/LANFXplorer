@@ -1,70 +1,83 @@
-# scanner_ping_threaded.py
-import subprocess
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dotenv import load_dotenv
+import getpass
 import os
+import subprocess, platform
+from dotenv import load_dotenv
+import re
 
-load_dotenv()
-BASE = os.getenv("DEFAULTIP", "172.18.0.2")
-cidr = os.getenv("CIDAR", "16")
-gateway = os.getenv("GATEWAY", "172.18.0.1")
-scanner_ip = os.getenv("SCANNER", "172.18.0.200")
-THREADS = 5
-START = 1
-END = 254  # inclusive
 
-def ping_range(start: int, end: int, base: str, timeout_seconds: int = 1):
-    """Ping each IP in [start, end] and return list of live IPs."""
-    live = []
-    for i in range(start, end + 1):
-        ip = f"{base}{i}"
-        # Run ping; suppress output
-        res = subprocess.run(
-            ["ping", "-c", "1", "-W", str(timeout_seconds), ip],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-        if res.returncode == 0:
-            live.append(ip)
-    return live
+default_ip = ""
+cidr = ""
+gateway = ""
+scanner_ip = ""
+interface = ""
+system_name = ""
+user = ""
+cpfiledest = ""
+pwd = ""
+file_path = ""
 
-def chunk_ranges(start: int, end: int, parts: int):
-    """Yield (chunk_start, chunk_end) pairs splitting [start,end] into parts."""
-    total = end - start + 1
-    base_chunk = total // parts
-    remainder = total % parts
-    cur = start
-    for i in range(parts):
-        extra = 1 if i < remainder else 0
-        chunk_size = base_chunk + extra
-        if chunk_size == 0:
-            yield (cur, cur - 1)  # empty
-        else:
-            chunk_start = cur
-            chunk_end = cur + chunk_size - 1
-            yield (chunk_start, chunk_end)
-            cur = chunk_end + 1
+def load_env():
+    global default_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd
+    load_dotenv()
+    default_ip = os.getenv("DEFAULTIP", "172.18.0.2")
+    cidr = os.getenv("CIDAR", "16")
+    gateway = os.getenv("GATEWAY", "172.18.0.1")
+    scanner_ip = os.getenv("SCANNER", "172.18.0.200")
+    interface = os.getenv("INTERFACE", None)
+    system_name = os.getenv("SYSTEM", platform.system().lower())
+    user = os.getenv("USER", getpass.getuser())
+    cpfiledest = os.getenv("COPYFILEPATH", None)
+    pwd = os.getenv("PWD", os.getcwd())
 
-def gethostlist(thread_count: int = THREADS, base: str = BASE, start: int = START, end: int = END):
-    ranges = list(chunk_ranges(start, end, thread_count))
-    live_hosts = []
+def checkfile():
+    global default_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
+    if os.path.exists(file_path):
+        pass
+    else:
+        open(file_path, "w").close()
 
-    with ThreadPoolExecutor(max_workers=thread_count) as exe:
-        futures = {}
-        for (s, e) in ranges:
-            if s > e:
-                continue
-            futures[exe.submit(ping_range, s, e, base)] = (s, e)
+def gethostlist():
+    load_env()
+    # elevate()
+    global default_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
+    file_path = os.path.join(os.getcwd(), "ipsn.txt")
+    if system_name.startswith("lin"):
+        return scanfromlinux()
+    elif system_name.startswith("win") or system_name.startswith("nt"):
+        return scanfromwin()
 
-        for fut in as_completed(futures):
-            s, e = futures[fut]
-            try:
-                res = fut.result()
-                print(f"[+] Chunk {s}-{e} -> {len(res)} live")
-                live_hosts.extend(res)
-            except Exception as exc:
-                print(f"[-] Chunk {s}-{e} generated exception: {exc}")
+def scanfromlinux():
+    global default_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
+    checkfile()
+    # print("inside the scanner", os.getcwd())
+    subnet = f"{gateway}/{cidr}"
+    result = subprocess.check_output(["nmap", "-Pn", subnet], text=True)
+    # print(result, "the result from the scanner")
+    unique_ips = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', result)
+    append_host(unique_ips)
+    return unique_ips
 
-    live_hosts_sorted = sorted(live_hosts, key=lambda ip: list(map(int, ip.split('.'))))
-    print(f"[+] {len(live_hosts_sorted)} live hosts found")
-    return live_hosts_sorted
+def scanfromwin():
+    global default_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
+    checkfile()
+    result = subprocess.run(["arp", "-a"], capture_output=True, text=True)
+    output = result.stdout
+    ips = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', output)
+    unique_ips = set(ips)
+    append_host(unique_ips)  
+    return unique_ips
+
+
+def append_host(lis):
+    global default_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, file_path
+    checkfile()
+    fh = open(file_path, "r")
+    data = fh.readlines()
+    fh.close()
+    existing_ips = list(set(line.strip() for line in data))
+    total_ips = set(existing_ips + lis)
+    fh = open(file_path, "w")
+    for ip in total_ips:
+        fh.write(ip + "\n")
+    fh.close()
+    os.system(f"cp  {file_path} {cpfiledest}")

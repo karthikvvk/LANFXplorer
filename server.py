@@ -7,11 +7,9 @@ from scanner import gethostlist
 import json
 import tkinter as tk
 from tkinter import filedialog
-import multiprocessing
 
 
 app = Flask(__name__)
- # Base directory (manual path, no os.path)
 IS_REMOTE = True
 ssh_client = None
 HOST_FILE = "host_list.json"
@@ -21,25 +19,19 @@ REMOTE_USER = ""
 
 
 def join_path(base, name, os_type):
-    """Safely join paths manually (no os.path)."""
     sep = "\\" if os_type == "windows" else "/"
-
-    # If already absolute, just return as-is
     if os_type == "windows" and (":" in name or name.startswith("\\")):
         return name
     if os_type != "windows" and name.startswith("/"):
         return name
-
     base = base.rstrip("\\/")  
     return base + sep + name
 
 
 
-# ---------- Get Remote OS Info ----------
 def get_OS_TYPE(REMOTE_HOST=""):
     if not IS_REMOTE:
         return "windows" if platform.system().lower().startswith("win") else "linux"
-
     try:
         response = requests.post(f"http://{REMOTE_HOST}:5000/osinfo", json={"request": "osinfo"}, timeout=5)
         # print("Response from remote host:", response.status_code, response.text)
@@ -76,17 +68,13 @@ def run_remote_command(command):
 
 
 def load_latest_host():
-    """Load last used host credentials from host_list.json"""
     global REMOTE_HOST, REMOTE_USER, REMOTE_PASS, OS_TYPE
-
-
     try:
         with open(HOST_FILE, "r") as f:
             data = json.load(f)
         if not data:
             return False
-
-        latest = data[-1]  # use last entry
+        latest = data[-1] 
         REMOTE_HOST = latest.get("ip")
         REMOTE_USER = latest.get("username")
         REMOTE_PASS = latest.get("password")
@@ -115,9 +103,9 @@ def select_destination():
 
 @app.route("/lsithost", methods=["GET"])
 def lsit_host():
-    host_list = gethostlist()  # returns dict {hostname: ip}
+    host_list = gethostlist()
     result = []
-
+    print(host_list)
     for ip in host_list:
         print("Getting OS info for:", ip)
         res = get_OS_TYPE(ip)
@@ -195,7 +183,7 @@ def delete_file():
     return jsonify({"status": status, "output": out, "error": err})
 
 
-# ---------- COPY ----------
+
 @app.route("/copy", methods=["POST"])
 def copy_file():
     source = request.json.get("source")
@@ -217,7 +205,6 @@ def copy_file():
 
 
 
-# ---------- MOVE ----------
 @app.route("/move", methods=["POST"])
 def move_file():
     source = request.json.get("source")
