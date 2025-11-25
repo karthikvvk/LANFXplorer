@@ -1,3 +1,5 @@
+import ipaddress
+from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 import paramiko
 import requests
@@ -7,6 +9,10 @@ from scanner import gethostlist
 import json
 import tkinter as tk
 from tkinter import filedialog
+import os, threading
+from quic_transfer import quic_transfer_file, start_quic_server
+import asyncio
+
 
 
 app = Flask(__name__)
@@ -15,8 +21,8 @@ ssh_client = None
 HOST_FILE = "host_list.json"
 OS_TYPE = ""
 REMOTE_USER = ""
-
-
+CHOOSENIP=""
+REMOTE_HOST = ""
 
 def join_path(base, name, os_type):
     sep = "\\" if os_type == "windows" else "/"
@@ -28,21 +34,20 @@ def join_path(base, name, os_type):
     return base + sep + name
 
 
-
 def get_OS_TYPE(REMOTE_HOST=""):
     if not IS_REMOTE:
         return "windows" if platform.system().lower().startswith("win") else "linux"
     try:
         response = requests.post(f"http://{REMOTE_HOST}:5000/osinfo", json={"request": "osinfo"}, timeout=5)
-        # print("Response from remote host:", response.status_code, response.text)
+        print("Response from remote host:", response.status_code, response.text)
         if response.status_code == 200:
             data = response.json()
-            return jsonify({"os": data.get("os", "linux"), "user": data.get("user")})
+            return {"os": data.get("os", "linux"), "user": data.get("user")}
         else:
-            return "linux"
-    except Exception as e:
-        print(f"Error contacting remote host: {e}")
-        return "linux"
+            return {"os": "linux", "user": None}
+    except:
+        print(f"Error contacting remote host")
+        return {"os": "linux", "user": None}
 
 
 def init_ssh():
@@ -68,7 +73,7 @@ def run_remote_command(command):
 
 
 def load_latest_host():
-    global REMOTE_HOST, REMOTE_USER, REMOTE_PASS, OS_TYPE
+    global REMOTE_HOST, REMOTE_USER, REMOTE_PASS, OS_TYPE, CHOOSENIP
     try:
         with open(HOST_FILE, "r") as f:
             data = json.load(f)
@@ -79,10 +84,29 @@ def load_latest_host():
         REMOTE_USER = latest.get("username")
         REMOTE_PASS = latest.get("password")
         OS_TYPE = latest.get("os_type", "linux")
+        load_dotenv()
+        CHOOSENIP = os.getenv("CHOOSENIP", "172.18.0.2")
         return True
     except Exception as e:
         print(f"Error reading host file: {e}")
         return False
+
+
+def check_subnet(ip):
+    # Load the default IP from environment variable
+    default_ip = os.getenv("DEFAULTIP")
+    if not default_ip:
+        raise ValueError("DEFAULTIP environment variable not set")
+
+    # Split both IPs into parts
+    ip_parts = ip.strip().split('.')
+    default_parts = default_ip.strip().split('.')
+    ed = ip_parts[-1]
+    print(ed, "this is ed")
+    if ed == '1' or ed == "200" or ed == "255":
+        return False
+    # Compare all but the last segment
+    return ip_parts[:-1] == default_parts[:-1]
 
 
 
@@ -103,15 +127,22 @@ def select_destination():
 
 @app.route("/lsithost", methods=["GET"])
 def lsit_host():
+    global CHOOSENIP
     host_list = gethostlist()
+    load_dotenv()
+    CHOOSENIP = os.getenv("CHOOSENIP", "172.18.0.2")
     result = []
     print(host_list)
     for ip in host_list:
-        print("Getting OS info for:", ip)
-        res = get_OS_TYPE(ip)
-        os_type = res.get_json().get("os")
-        username = res.get_json().get("user")
-        result.append({"host": ip, "os": os_type, "user": username})
+        subck = check_subnet(ip)
+        print(subck)
+        if subck:
+            print("Getting OS info for:", ip)
+            res = get_OS_TYPE(ip)
+            # print(f"os info for {ip}", res)
+            os_type = res.get("os")
+            username = res.get("user")
+            result.append({"host": ip, "os": os_type, "user": username})
 
     return jsonify(result)
 
@@ -139,7 +170,6 @@ def osinfo():
         return jsonify({"error": str(e)}), 500
 
 
-# ---------- CREATE ----------
 @app.route("/create", methods=["POST"])
 def create_file():
     filename = request.json.get("filename")
@@ -161,26 +191,20 @@ def create_file():
     return jsonify({"status": status, "output": out, "error": err})
 
 
-# ---------- DELETE ----------
 @app.route("/delete", methods=["DELETE"])
 def delete_file():
     filename = request.json.get("filename")
     if not filename:
         return jsonify({"error": "filename required"}), 400
 
-    full_path = join_path("", filename, OS_TYPE)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    result = loop.run_until_complete(
+        quic_transfer_file(REMOTE_HOST, 4443, "delete", filename, "")
+    )
 
-    if OS_TYPE == "windows":
-        command = (
-            f"powershell -Command "
-            f"Remove-Item -Path '{full_path}' -Force -ErrorAction SilentlyContinue; "
-            f"Write-Output 'Deleted file: {full_path}'"
-        )
-    else:
-        command = f'rm -f "{full_path}" && echo "Deleted file: {full_path}"'
-    print("comm", command)
-    status, out, err = run_remote_command(command)
-    return jsonify({"status": status, "output": out, "error": err})
+    return jsonify(result)
+
 
 
 
@@ -191,17 +215,14 @@ def copy_file():
     if not source or not destination:
         return jsonify({"error": "source and destination required"}), 400
 
-    if OS_TYPE == "windows":
-        command = (
-            f"powershell -Command "
-            f"Copy-Item -Path '{source}' -Destination '{destination}' -Force -ErrorAction SilentlyContinue; "
-            f"Write-Output 'Copied file: {source} → {destination}'"
-        )
-    else:
-        command = f'cp -f "{source}" "{destination}" && echo "Copied file: {source} → {destination}"'
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    result = loop.run_until_complete(
+        quic_transfer_file(REMOTE_HOST, 4443, "copy", source, destination)
+    )
 
-    status, out, err = run_remote_command(command)
-    return jsonify({"status": status, "output": out, "error": err})
+    return jsonify(result)
+
 
 
 
@@ -212,18 +233,17 @@ def move_file():
     if not source or not destination:
         return jsonify({"error": "source and destination required"}), 400
 
-    if OS_TYPE == "windows":
-        command = (
-            f"powershell -Command "
-            f"Move-Item -Path '{source}' -Destination '{destination}' -Force -ErrorAction SilentlyContinue; "
-            f"Write-Output 'Moved file: {source} → {destination}'"
-        )
-    else:
-        command = f'mv -f "{source}" "{destination}" && echo "Moved file: {source} → {destination}"'
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    result = loop.run_until_complete(
+        quic_transfer_file(REMOTE_HOST, 4443, "move", source, destination)
+    )
 
-    status, out, err = run_remote_command(command)
-    return jsonify({"status": status, "output": out, "error": err})
+    return jsonify(result)
+
 
 
 if __name__ == "__main__":
+    # app.run(host="0.0.0.0")
+    threading.Thread(target=lambda: asyncio.run(start_quic_server(host="0.0.0.0", port=4443)), daemon=True).start()
     app.run(host="0.0.0.0")

@@ -1,9 +1,9 @@
-import os
+import os, time
 import re
 import platform
 import subprocess
 import ipaddress
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 from elevate import elevate
 from scanner import *
 
@@ -45,16 +45,13 @@ def scan_network():
     global default_ip, cidr, gateway, scanner_ip, interface, system_name, user, cpfiledest, pwd, subnet_mask, broadcast, subnet
     
     print(f"[*] Using subnet from .env: {subnet}")
-    if system_name == "linux":
-        # Detect ethernet interface starting with 'e'
-        
+    if system_name == "linux":        
         print(f"[*] Using interface: {interface}")
-
-        # Temporarily assign scanner IP
         print(f"[*] Assigning temporary scanner IP {scanner_ip}/{cidr} to {interface}")
         subprocess.run(f"sudo ip addr flush dev {interface}", shell=True)
         subprocess.run(f"sudo ip addr add {scanner_ip}/{cidr} dev {interface}", shell=True)
         print("Assigned Temp IP:")
+        set_key(os.path.join(pwd, ".env"), "CHOOSENIP", scanner_ip)
         os.system("ip a")
         print("Scanning hots in network. Pls wait this will take 1-2 min")
         unique_ips = gethostlist()
@@ -63,9 +60,7 @@ def scan_network():
         if scanner_ip in unique_ips:
             unique_ips.remove(scanner_ip)
         return unique_ips, interface
-
     elif system_name.startswith("win"):
-
         print(f"[*] Using interface: {interface}")
         print(f"[*] Assigning temporary scanner IP {scanner_ip}/{cidr} to {interface}")
         subprocess.run([
@@ -77,12 +72,12 @@ def scan_network():
             f"New-NetIPAddress -InterfaceAlias '{interface}' -IPAddress '{scanner_ip}' -PrefixLength {cidr}"
         ], check=True)
         print("Assigned Temp IP:")
+        set_key(os.path.join(pwd, ".env"), "CHOOSENIP", scanner_ip)
         os.system("ipconfig")
         unique_ips = gethostlist()
         print("Scanning hots in network. Pls wait this will take 1-2 min")
         print(f"[+] Found {len(unique_ips)} active hosts on LAN")
         return unique_ips, interface
-
     else:
         print("[-] Unsupported OS for scanning! Sry")
         return set(), None
@@ -127,7 +122,7 @@ def configure_windows(adapter, ip, netmask, gateway):
 
 
 
-elevate(show_console=False)
+elevate(graphical=False, show_console=False)
 load_env()
 print("[*] Loaded configuration from .env:")
 print(f"    DEFAULTIP = {default_ip}")
@@ -154,4 +149,8 @@ elif "windows" in system_name:
     configure_windows(iface, chosen_ip, subnet_mask, gateway)
 else:
     print("[-] Unsupported OS type")
+# time.sleep(50)
+
+set_key(os.path.join(pwd, ".env"), "CHOOSENIP", chosen_ip)
+print("choosen ip set in env")
 print(f"[✓] Successfully assigned {chosen_ip} on interface {iface}")

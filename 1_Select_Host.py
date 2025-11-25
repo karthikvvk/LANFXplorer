@@ -2,33 +2,37 @@ import streamlit as st
 import requests
 import json
 from pathlib import Path
-import subprocess
-
+import os
+from dotenv import load_dotenv
 
 st.set_page_config(page_title="Select Host", layout="centered")
 
-try:
-    result = subprocess.run(
-        "ip route get 1.1.1.1 | awk '{print $7; exit}'",
-        capture_output=True,
-        text=True,
-        shell=True
-    )
-    ip = result.stdout.strip()
-except Exception as e:
-    pass
-try:
-    result = subprocess.run(["ipconfig"], capture_output=True, text=True)
-    for line in result.stdout.splitlines():
-        if "IPv4" in line:
-            ip_parts = line.split()[-1].split(".")[-4:]
-            ip = ".".join(ip_parts)
-            # print(ip)
-except:
-    pass
+# try:
+#     result = subprocess.run(
+#         "ip route get 1.1.1.1 | awk '{print $7; exit}'",
+#         capture_output=True,
+#         text=True,
+#         shell=True
+#     )
+#     ip = result.stdout.strip()
+# except Exception as e:
+#     pass
+# try:
+#     result = subprocess.run(["ipconfig"], capture_output=True, text=True)
+#     for line in result.stdout.splitlines():
+#         if "IPv4" in line:
+#             ip_parts = line.split()[-1].split(".")[-4:]
+#             ip = ".".join(ip_parts)
+#             # print(ip)
+# except:
+#     pass
+
+
+load_dotenv()
+ip = os.getenv("CHOOSENIP", "172.18.0.2")
 
 FLASK_BACKEND = "http://" + ip + ":5000"
-print(FLASK_BACKEND)
+# print(FLASK_BACKEND)
 st.session_state.ip = FLASK_BACKEND
 st.title("🌐 Network Hosts")
 st.write("Select a host to connect:")
@@ -44,9 +48,9 @@ def get_host_list():
 if "host_data" not in st.session_state:
     st.session_state.host_data = get_host_list()
 host_data = st.session_state.host_data
-if not host_data:
-    st.warning("No hosts found.")
-    st.stop()
+# if not host_data:
+#     st.warning("No hosts found.")
+#     st.stop()
 
 selected_host = st.session_state.get("selected_host")
 

@@ -2,6 +2,7 @@ import getpass
 import os
 import platform
 import re, subprocess
+from dotenv import set_key, load_dotenv
 
 
 dirs = os.listdir()
@@ -10,6 +11,9 @@ user = getpass.getuser()
 sys = platform.system().lower()
 copyfilepath = os.path.join(pwd, "ipsn.txt")
 interface = None
+laytodir="pages"
+laytofil = "2_File_Manager.py"
+
 
 
 lis = ['.env', '1_Select_Host.py',  'server.py', 'requirement.txtt', 'scanner.py', 'startsetup.py', 'set_static_ip.py']
@@ -20,7 +24,7 @@ for i in lis:
         print(f"Critical File {i} are not Available!!")
         exit()
 
-if os.path.exists(f'{pwd}/pages/2_File_Manager.py'):
+if os.path.exists(os.path.join(pwd,laytodir, laytofil)):
     pass
 else:
     print(f"Critical File {pwd}/pages/2_File_Manager.py are not Available!!")
@@ -34,6 +38,7 @@ if sys.startswith("linux"):
         # if i.startswith("e"):
         if i.startswith("w"):
             interface = i
+            print("the iface: ", interface)
             break
     if not interface:
         raise Exception("[-] No Ethernet interface found")
@@ -46,6 +51,13 @@ elif sys.startswith("win") or sys.startswith("nt"):
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
     interface = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    for i in interface:
+        u = i.lower()
+        # if u.startswith("e"):
+        if u.startswith("w"):
+            interface = u
+            # print("the iface: ", interface)
+            break
     if not interface:
         raise Exception("[-] No Ethernet interface found")
     
@@ -59,18 +71,13 @@ env_vars = {
     "INTERFACE": interface,
     "COPYFILEPATH": copyfilepath
 }
-
 env_file = ".env"
-existing = {}
-if os.path.exists(env_file):
-    with open(env_file) as f:
-        for line in f:
-            if "=" in line:
-                k, v = line.strip().split("=", 1)
-                existing[k] = v
-with open(env_file, "w") as f:
-    for k, v in {**existing, **env_vars}.items():
-        f.write(f"{k}={v}\n")
+load_dotenv(env_file)
+if not os.path.exists(env_file):
+    open(env_file, "a").close()
+for key, value in env_vars.items():
+    set_key(env_file, key, str(value))
 
 
-os.system("python " + pwd + "/set_static_ip.py")
+
+os.system("python " + os.path.join(pwd, "set_static_ip.py"))
