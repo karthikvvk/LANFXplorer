@@ -73,7 +73,7 @@ import subprocess
 
 def ping_silent(ip):
     subprocess.run(
-        ["ping", "-W1", "-c1", ip],
+        ["ping", "-w1", ip],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL
     )
@@ -90,7 +90,7 @@ def scanfromwin():
 
     # Example: replace gateway/cidr with actual network base
     # Assuming the network is 172.18.0.x
-    base = "172.18.0."
+    base = gateway.rsplit('.', 1)[0] + "."
 
     for i in range(1, 255):
         ip = base + str(i)
@@ -124,3 +124,4 @@ def append_host(lis):
         fh.write(ip + "\n")
     fh.close()
     os.system(f"cp  {file_path} {cpfiledest}")
+print(gethostlist())
