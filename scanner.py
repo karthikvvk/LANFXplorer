@@ -73,7 +73,7 @@ import subprocess
 
 def ping_silent(ip):
     subprocess.run(
-        ["ping", "-w1", ip],
+        ["ping", "-n", "1", "-w", "1", ip],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL
     )
@@ -94,14 +94,16 @@ def scanfromwin():
 
     for i in range(1, 255):
         ip = base + str(i)
-        thr = threading.Thread(target=ping_silent, args=(ip,))
-        threads.append(thr)
+        # thr = threading.Thread(target=ping_silent, args=(ip,))
+        print(ip)
+        ping_silent(ip)
+        # threads.append(thr)
 
-    for thr in threads:
-        thr.start()
+    # for thr in threads:
+    #     thr.start()
 
-    for thr in threads:
-        thr.join()
+    # for thr in threads:
+    #     thr.join()
 
    
     result = subprocess.run(["arp", "-a"], capture_output=True, text=True)
