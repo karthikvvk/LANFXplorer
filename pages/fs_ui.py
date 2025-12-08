@@ -1,12 +1,28 @@
+# pages/fs_ui.py
 import streamlit as st
 import os
 from pathlib import Path
 import requests
 import json
+from startsetup import load_env_vars
 
 st.set_page_config(page_title="P2P File Browser", page_icon="📁", layout="wide")
 
-API_BRIDGE_BASE = "http://localhost:5000"  # assumes api_bridge runs locally
+# ---------- Env + Session Integration ----------
+
+env = load_env_vars()
+
+# Local machine where api_bridge.py is running
+local_host = env.get("host") or "127.0.0.1"
+local_port = env.get("port") or 5000  # api_bridge is 5000, QUIC is 4433
+API_BRIDGE_BASE = f"http://{local_host}:5000"
+
+# Remote peer (receiver side) selected via host_selectorui.py
+remote_host = st.session_state.get("REMOTE_HOST") or env.get("dest_host")
+
+# Remote override API base if set (from host_selectorui)
+remote_override_api = st.session_state.get("remote_override_api")
+# If override exists, use it for /listdir; otherwise, we’ll use http://<remote_host>:5000
 
 st.markdown("""
 <style>
@@ -17,23 +33,16 @@ st.markdown("""
 
 # ---------- Helpers ----------
 
-def fetch_peers():
-    """Call local api_bridge /listhost to get list of peers."""
-    try:
-        resp = requests.get(f"{API_BRIDGE_BASE}/listhost", timeout=3)
-        if resp.status_code == 200:
-            return resp.json()
-        else:
-            return []
-    except Exception:
-        return []
-
-
 def remote_listdir(remote_host: str, path: str):
     """Call /listdir on a remote host."""
     try:
+        if remote_override_api:
+            base = remote_override_api.rstrip("/")
+        else:
+            base = f"http://{remote_host}:5000"
+
         resp = requests.post(
-            f"http://{remote_host}:5000/listdir",
+            f"{base}/listdir",
             json={"path": path},
             timeout=5,
         )
@@ -46,7 +55,10 @@ def remote_listdir(remote_host: str, path: str):
 
 
 def send_files_to_remote(remote_host: str, files: list[str]):
-    """Call local /send_files to trigger QUIC sender."""
+    """
+    Call local /send_files on our api_bridge to trigger QUIC sender.
+    remote_host is still passed in JSON so /send_files can override DEST_HOST.
+    """
     try:
         resp = requests.post(
             f"{API_BRIDGE_BASE}/send_files",
@@ -131,7 +143,7 @@ def render_remote_tree(remote_host: str, path_state_key: str, key_prefix: str):
     try:
         current_path = st.session_state.get(path_state_key)
         if not current_path:
-            # Default remote path: for simplicity, start at '/'
+            # Default remote path: start at '/'
             current_path = "/"
             st.session_state[path_state_key] = current_path
 
@@ -164,11 +176,8 @@ def render_remote_tree(remote_host: str, path_state_key: str, key_prefix: str):
 
         for item in items:
             full_path = os.path.join(result.get("path", current_path), item)
-            # we don't know type without another call; simple heuristic:
-            # try to descend by clicking -> call listdir again
             btn_key = f"{key_prefix}_entry_{full_path}"
             if st.button(item, key=btn_key, use_container_width=True):
-                # naive approach: assume it's a dir and try to ls; if error, will show
                 st.session_state[path_state_key] = full_path
                 st.rerun()
 
@@ -188,29 +197,29 @@ if "selected_local_files" not in st.session_state:
 if "remote_path" not in st.session_state:
     st.session_state.remote_path = "/"
 
-if "selected_remote_host" not in st.session_state:
-    st.session_state.selected_remote_host = None
+# If host_selector set REMOTE_HOST, keep it; else write from env
+if "REMOTE_HOST" not in st.session_state and remote_host:
+    st.session_state["REMOTE_HOST"] = remote_host
 
 
 # ---------- UI ----------
 st.title("🔄 P2P File Browser (QUIC)")
 
-# Sidebar: peer selection
 with st.sidebar:
-    st.subheader("🧑‍💻 Peers")
-    peers = fetch_peers()
-    if not peers:
-        st.warning("No peers found via /listhost")
-        st.write("Make sure api_bridge is running and subnet scanning works.")
+    st.subheader("🔧 Context")
+    st.write("**Local api_bridge:**")
+    st.code(API_BRIDGE_BASE, language=None)
+
+    st.write("**Remote host (receiver):**")
+    if st.session_state.get("REMOTE_HOST"):
+        st.success(st.session_state["REMOTE_HOST"])
+        if remote_override_api:
+            st.caption(f"Remote API override: {remote_override_api}")
+        st.caption("Set by Select Host page or DEST_HOST in .env")
     else:
-        options = [f"{p['host']} ({p.get('user') or 'unknown'} / {p.get('os')})" for p in peers]
-        host_map = {opt: p["host"] for opt, p in zip(options, peers)}
+        st.error("No REMOTE_HOST set. Go to 'Select Host' page first.")
+        st.stop()  # stop rendering rest of page
 
-        default_opt = options[0]
-        selected_opt = st.selectbox("Select remote host", options, index=0)
-        st.session_state.selected_remote_host = host_map[selected_opt]
-
-        st.caption(f"Selected remote: {st.session_state.selected_remote_host}")
 
 # Main layout: left = local (sender), right = remote (receiver)
 col_local, col_remote = st.columns([3, 3])
@@ -231,11 +240,12 @@ with col_local:
 
     st.divider()
 
-    if st.session_state.selected_remote_host and st.session_state.selected_local_files:
+    remote_host_effective = st.session_state.get("REMOTE_HOST")
+    if remote_host_effective and st.session_state.selected_local_files:
         if st.button("📤 Send selected to remote", use_container_width=True):
             with st.spinner("Sending files via QUIC..."):
                 resp = send_files_to_remote(
-                    st.session_state.selected_remote_host,
+                    remote_host_effective,
                     st.session_state.selected_local_files,
                 )
                 if isinstance(resp, Exception):
@@ -254,11 +264,12 @@ with col_local:
 
 with col_remote:
     st.subheader("📡 Remote (Receiver)")
-    if not st.session_state.selected_remote_host:
-        st.info("Select a remote host in the sidebar.")
+    remote_host_effective = st.session_state.get("REMOTE_HOST")
+    if not remote_host_effective:
+        st.info("No remote host. Select one in the 'Select Host' page.")
     else:
         render_remote_tree(
-            st.session_state.selected_remote_host,
+            remote_host_effective,
             "remote_path",
             "remote"
         )
