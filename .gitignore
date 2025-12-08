@@ -1,4 +1,7 @@
-*.json
+*.pem
 *.txt
-__pycache__/
+*.json
+send_files/
+received_files/
 dump/
+__pycache__/
