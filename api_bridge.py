@@ -151,7 +151,7 @@ def list_directory():
 
 # ---------- NEW: trigger non-interactive QUIC send ----------
 @app.route("/send_files", methods=["POST"])
-def send_files():
+def send_files():#ip=None):
     """
     Trigger a QUIC file send to a remote peer.
 
@@ -165,7 +165,8 @@ def send_files():
         data = request.get_json() or {}
         files = data.get("files", [])
         remote_host = data.get("remote_host")
-
+        # if ip:
+        #     remote_host = ip
         if not isinstance(files, list) or not files:
             return jsonify({"status": "error", "message": "files must be a non-empty list"}), 400
 
@@ -211,6 +212,76 @@ def send_files():
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+
+
+@app.route("/receive_files", methods=["POST"])
+def receive_files():
+    """
+    Request files from a remote peer (pull operation).
+    This tells the REMOTE peer to send files to US.
+    
+    JSON body:
+    {
+      "remote_host": "192.168.0.100",  # The peer that HAS the files
+      "files": ["/remote/path/1"],      # File paths on REMOTE peer
+      "local_dest": "/local/path"       # Not used, but kept for clarity
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        remote_host = data.get("remote_host")
+        files = data.get("files", [])
+        
+        if not remote_host:
+            return jsonify({"status": "error", "message": "remote_host is required"}), 400
+            
+        if not isinstance(files, list) or not files:
+            return jsonify({"status": "error", "message": "files must be a non-empty list"}), 400
+
+        # Get OUR IP address (where files should be sent)
+        env = load_env_vars()
+        our_host = env.get("host")
+        
+        if not our_host:
+            return jsonify({"status": "error", "message": "Cannot determine local host IP"}), 500
+
+        # Tell the REMOTE peer to send files to US
+        # This is the key insight: we call the remote's /send_files endpoint
+        # and pass OUR IP as the destination
+        try:
+            response = requests.post(
+                f"http://{remote_host}:5000/send_files",
+                json={
+                    "remote_host": our_host,  # Send to US
+                    "files": files            # Files on REMOTE system
+                },
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return jsonify({
+                    "status": "success",
+                    "message": f"Requested {len(files)} file(s) from {remote_host}",
+                    "remote_response": result
+                }), 200
+            else:
+                return jsonify({
+                    "status": "error",
+                    "message": f"Remote peer returned error: {response.text}"
+                }), response.status_code
+                
+        except requests.RequestException as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Failed to contact remote peer: {str(e)}"
+            }), 500
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 
 
 if __name__ == "__main__":

@@ -80,11 +80,38 @@ def remote_listdir(remote_host: str, path: str):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
 def send_files_to_remote(remote_host: str, files: list[str]):
+    """Send local files to remote host"""
     try:
         resp = requests.post(
             f"{API_BRIDGE_BASE}/send_files",
             json={"remote_host": remote_host, "files": files},
+            timeout=60,
+        )
+        return resp
+    except Exception as e:
+        return e
+
+
+def receive_files_from_remote(remote_host: str, files: list[str]):
+    """
+    Tell remote peer to send its files to us (P2P swap).
+    This leverages the P2P architecture by calling the remote's /send_files
+    endpoint with OUR IP as the destination.
+    """
+    try:
+        # Get our local IP to tell remote where to send
+        our_host = env.get("host") or "127.0.0.1"
+        
+        # Call remote's /send_files, but specify US as the destination
+        api_base = (remote_override_api or f"http://{remote_host}:5000").rstrip("/")
+        resp = requests.post(
+            f"{api_base}/send_files",
+            json={
+                "remote_host": our_host,  # Send to US
+                "files": files            # Files on REMOTE peer
+            },
             timeout=60,
         )
         return resp
@@ -139,6 +166,7 @@ def render_local_tree(path_state_key, key_prefix, selected_key):
             else:
                 if full_path in st.session_state[selected_key]:
                     st.session_state[selected_key].remove(full_path)
+
 
 # ------------------------------------------
 # Remote Tree Renderer (matching local UI style)
@@ -207,6 +235,7 @@ def render_remote_tree(remote_host: str, path_state_key: str, key_prefix: str, s
                 if full_path in st.session_state[selected_key]:
                     st.session_state[selected_key].remove(full_path)
 
+
 # ------------------------------------------
 # Initial Session State
 # ------------------------------------------
@@ -244,9 +273,16 @@ with col_local:
     st.subheader("💻 Local Files")
     render_local_tree("local_path", "local", "selected_local_files")
     st.divider()
-    if st.session_state.selected_local_files:
-        st.info(f"Selected local: {len(st.session_state.selected_local_files)} file(s)")
-        if st.button("📤 Send to Remote", use_container_width=True):
+    
+    st.info(f"Selected: {len(st.session_state.selected_local_files)} file(s)")
+    
+    if st.button(
+        "📤 Send to Remote", 
+        use_container_width=True,
+        disabled=len(st.session_state.selected_local_files) == 0,
+        help="Send selected local files to remote peer"
+    ):
+        with st.spinner("Sending files..."):
             resp = send_files_to_remote(
                 st.session_state["REMOTE_HOST"],
                 st.session_state["selected_local_files"]
@@ -254,11 +290,13 @@ with col_local:
             try:
                 data = resp.json()
                 if data.get("status") == "success":
-                    st.success("Transfer complete!")
+                    st.success(f"✅ Sent {len(data.get('sent', []))} file(s)")
+                    st.session_state["selected_local_files"] = []
+                    st.rerun()
                 else:
-                    st.error(str(data))
-            except Exception:
-                st.error("Invalid server response!")
+                    st.error(f"❌ {data.get('message', 'Transfer failed')}")
+            except Exception as e:
+                st.error(f"❌ Invalid response: {e}")
 
 with col_remote:
     st.subheader("📡 Remote Files")
@@ -269,6 +307,29 @@ with col_remote:
         "selected_remote_files",
     )
     st.divider()
-    if st.session_state.selected_remote_files:
-        st.info(f"Selected remote: {len(st.session_state.selected_remote_files)} item(s)")
-        # Future: download/delete actions can hook into selected_remote_files here
+    
+    st.info(f"Selected: {len(st.session_state.selected_remote_files)} file(s)")
+    
+    if st.button(
+        "📥 Download to Local", 
+        use_container_width=True,
+        disabled=len(st.session_state.selected_remote_files) == 0,
+        help="Download selected remote files to current local directory"
+    ):
+        with st.spinner("Requesting files from remote..."):
+            # P2P Swap: Tell remote to send files to us
+            resp = receive_files_from_remote(
+                st.session_state["REMOTE_HOST"],
+                st.session_state["selected_remote_files"]
+            )
+            try:
+                data = resp.json()
+                if data.get("status") == "success":
+                    local_path = st.session_state.get("local_path", "~")
+                    st.success(f"✅ Downloaded {len(data.get('sent', []))} file(s) to {local_path}")
+                    st.session_state["selected_remote_files"] = []
+                    st.rerun()
+                else:
+                    st.error(f"❌ {data.get('message', 'Transfer failed')}")
+            except Exception as e:
+                st.error(f"❌ Invalid response: {e}")
