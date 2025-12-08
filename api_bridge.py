@@ -1,4 +1,3 @@
-#api_bridge.py
 from datetime import datetime
 from flask import Flask, request, jsonify
 import os
@@ -9,6 +8,8 @@ from scanner import *
 from flask_cors import CORS
 import platform
 import getpass
+import asyncio  # NEW
+from sender_api_functions import quic_connect, send_file, close_connection  # NEW
 
 
 app = Flask(__name__)
@@ -142,6 +143,71 @@ def list_directory():
             return jsonify({"status": "success", "type": "directory", "files": items}), 200
 
         return jsonify({"status": "error", "message": f"Unknown filesystem object: {path}"}), 400
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+
+# ---------- NEW: trigger non-interactive QUIC send ----------
+@app.route("/send_files", methods=["POST"])
+def send_files():
+    """
+    Trigger a QUIC file send to a remote peer.
+
+    JSON body:
+    {
+      "remote_host": "192.168.0.100",   # optional, uses DEST_HOST/HOST if missing
+      "files": ["/abs/path/1", "/abs/path/2"]
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        files = data.get("files", [])
+        remote_host = data.get("remote_host")
+
+        if not isinstance(files, list) or not files:
+            return jsonify({"status": "error", "message": "files must be a non-empty list"}), 400
+
+        env = load_env_vars()
+        if not remote_host:
+            remote_host = env.get("dest_host") or env.get("host")
+
+        if not remote_host:
+            return jsonify({"status": "error", "message": "remote_host or DEST_HOST/HOST not set"}), 400
+
+        port = env.get("port") or 4433
+
+        # verify files exist
+        valid_files = []
+        missing = []
+        for f in files:
+            if os.path.isfile(f):
+                valid_files.append(f)
+            else:
+                missing.append(f)
+
+        if not valid_files:
+            return jsonify({"status": "error", "message": "no valid files to send", "missing": missing}), 400
+
+        async def _do_send():
+            # For now we use insecure=True assuming self-signed
+            conn = await quic_connect(host=remote_host, port=port, insecure=True)
+            try:
+                for path in valid_files:
+                    await send_file(conn, path)
+            finally:
+                await close_connection(conn)
+
+        asyncio.run(_do_send())
+
+        return jsonify({
+            "status": "success",
+            "remote_host": remote_host,
+            "port": port,
+            "sent": valid_files,
+            "missing": missing
+        }), 200
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
