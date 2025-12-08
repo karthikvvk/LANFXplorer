@@ -244,7 +244,7 @@ def write_env():
         os.system("""openssl req -x509 -nodes -newkey rsa:2048 -keyout key.pem -out cert.pem  -days 365 -subj "/CN=quic-server.local\"""")
     get_network_info()
     env_vars = {
-        "HOST": "0.0.0.0",
+        "HOST": host_ip,
         "SUBNET": subnet,
         "CIDR": cidr,
         "GATEWAY": gateway,
