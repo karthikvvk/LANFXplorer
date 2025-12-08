@@ -46,15 +46,15 @@ async def main() -> None:
     # Load env variables from .env via your helper
     env = load_env_vars()
 
-    # DEST_HOST is the primary remote host; fallback to HOST if needed
-    dest_host = env.get("dest_host") or env.get("host")
+    # DEST_HOST is the remote receiver's IP; fallback to RECIVHOST for local receiver
+    dest_host = env.get("dest_host") or env.get("recivhost") or "127.0.0.1"
     port = env.get("port") or 4433
     src_dir = env.get("src") or ""  # optional convenience
     # For now we always connect "insecure" (self-signed cert typical in your tests)
     insecure = True
 
-    if not dest_host:
-        print("[sender] ERROR: DEST_HOST or HOST must be set in .env")
+    if not dest_host or dest_host == "0.0.0.0":
+        print("[sender] ERROR: DEST_HOST must be set in .env (or RECIVHOST cannot be 0.0.0.0)")
         sys.exit(1)
 
     if src_dir:

@@ -18,7 +18,7 @@ async def main() -> None:
     # Load env variables from .env via your helper
     env = load_env_vars()
 
-    host = env.get("host") or "0.0.0.0"
+    recivhost = env.get("recivhost") or "0.0.0.0"
     port = env.get("port") or 4433
     cert_path = env.get("certi") or "cert.pem"
     key_path = env.get("key") or "key.pem"
@@ -37,7 +37,7 @@ async def main() -> None:
     os.makedirs(out_dir, exist_ok=True)
 
     print(f"[receiver] Loaded from env:")
-    print(f"          HOST={host}")
+    print(f"          RECIVHOST={recivhost}")
     print(f"          PORT={port}")
     print(f"          CERTI={cert_path}")
     print(f"          KEY={key_path}")
@@ -45,7 +45,7 @@ async def main() -> None:
 
     # Start the QUIC receiver using the API
     server = await start_receiver(
-        host=host,
+        host=recivhost,
         port=port,
         certificate=cert_path,
         private_key=key_path,
@@ -53,7 +53,7 @@ async def main() -> None:
         save_dir=out_dir,
     )
 
-    print(f"[receiver] Listening on {host}:{port}")
+    print(f"[receiver] Listening on {recivhost}:{port}")
     print("[receiver] Press Ctrl+C to stop.")
 
     try:
