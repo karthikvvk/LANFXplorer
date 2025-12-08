@@ -154,7 +154,7 @@ for i, h in enumerate(display_hosts):
         st.session_state["REMOTE_USER"] = sel_user
         st.session_state["REMOTE_PASS"] = ""  # no password required
         st.session_state["remote_override_api"] = f"http://{sel_ip}:5000"
-
+        st.session_state["REMOTE_OS"] = sel_os
 
         st.success(f"Selected host {sel_user}@{sel_ip} — DEST_HOST updated.")
 

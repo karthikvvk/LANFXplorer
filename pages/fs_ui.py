@@ -5,10 +5,81 @@ from pathlib import Path
 import requests
 import json
 from startsetup import load_env_vars
+import ntpath
+import posixpath
+from typing import Iterable, Union
+
 
 st.set_page_config(page_title="P2P File Browser", page_icon="📁", layout="wide")
 
 # ---------- Env + Session Integration ----------
+
+
+
+
+PathLike = Union[str, Iterable[str]]
+
+def pathresolver(path: PathLike,
+                 *,
+                 remote_os: str | None = None,
+                 base: str | None = None) -> str:
+    """
+    Resolve a path for the *remote* host, using its OS type.
+
+    - `path` can be:
+        - a string: "Downloads/file.txt"
+        - a list/tuple: ["Downloads", "file.txt"]
+    - `remote_os`:
+        - "windows", "win32", etc. => use ntpath
+        - anything else => use posixpath
+        - if None => use st.session_state["REMOTE_OS"] or default "linux"
+    - `base`:
+        - optional remote base directory
+        - if given and `path` is relative, we join base + path
+    """
+
+    # 1) Determine OS type
+    if remote_os is None:
+        remote_os = (st.session_state.get("REMOTE_OS") or "linux").lower()
+    else:
+        remote_os = remote_os.lower()
+
+    if remote_os.startswith("win"):
+        pmod = ntpath
+    else:
+        pmod = posixpath
+
+    # 2) Normalize `path` to a string or join segments
+    if isinstance(path, str):
+        target = path
+    else:
+        # assume iterable of segments
+        segments = list(path)
+        if not segments:
+            target = ""
+        else:
+            target = segments[0]
+            for seg in segments[1:]:
+                target = pmod.join(target, seg)
+
+    # 3) If base is provided and target is relative, join base + target
+    if base:
+        # For Windows, treat drive letter or leading slash as absolute
+        if remote_os.startswith("win"):
+            is_abs = pmod.isabs(target) or (len(target) >= 2 and target[1] == ":")
+        else:
+            is_abs = pmod.isabs(target)
+
+        if not is_abs:
+            target = pmod.join(base, target)
+
+    # 4) Normalize slashes etc.
+    target = pmod.normpath(target)
+
+    return target
+
+
+
 
 env = load_env_vars()
 
