@@ -171,7 +171,7 @@ def send_files():
 
         env = load_env_vars()
         if not remote_host:
-            remote_host = env.get("dest_host") or env.get("host")
+            remote_host = env.get("dest_host") or env.get("recivhost") or env.get("host")
 
         if not remote_host:
             return jsonify({"status": "error", "message": "remote_host or DEST_HOST/HOST not set"}), 400

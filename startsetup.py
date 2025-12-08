@@ -22,6 +22,7 @@ src_dir = pwd
 key = os.path.join(pwd, "key.pem")
 certi = os.path.join(pwd, "cert.pem")
 dest_host = ""
+reciv_host = "0.0.0.0"
 
 
 def detect_interface():
@@ -31,7 +32,7 @@ def detect_interface():
     - Fall back to first non-loopback UP interface with an inet addr
     - Ignore obvious virtual/docker interfaces (veth, docker*, br-*, cni0)
     """
-    global host_ip, cidr, interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
+    global host_ip, cidr, interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host
 
     if sys.startswith("linux"):
         # get a compact ip output with addresses on one line per interface
@@ -172,7 +173,7 @@ def get_network_info():
 
 def load_env_vars():
     """Load environment variables from .env file into global variables"""
-    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
+    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host
     
     load_dotenv()
     
@@ -192,6 +193,7 @@ def load_env_vars():
     certi = os.getenv("CERTI", "")
     key = os.getenv("KEY", "")
     dest_host = os.getenv("DEST_HOST", "")
+    reciv_host = os.getenv("RECIVHOST", "0.0.0.0")
     
     print(f"[+] Loaded environment variables from .env")
     # print({
@@ -226,18 +228,19 @@ def load_env_vars():
         "gateway": gateway,
         "broadcast": broadcast_address,
         "cidr": cidr,
-        "dest_host": dest_host
+        "dest_host": dest_host,
+        "recivhost": reciv_host
     }
 
 
 def update_env():
-    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
+    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host
     
 
 
 
 def write_env():
-    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
+    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host
     detect_interface()
     ls = os.listdir(pwd)
     if "key.pem" not in ls or "cert.pem" not in ls:
@@ -258,7 +261,8 @@ def write_env():
         "SRCDIR": src_dir,
         "CERTI": certi,
         "KEY": key,
-        "DEST_HOST": dest_host
+        "DEST_HOST": dest_host,
+        "RECIVHOST": reciv_host
 
     }
 
