@@ -3,7 +3,6 @@ import streamlit as st
 import os
 from pathlib import Path
 import requests
-import json
 import ntpath
 import posixpath
 from typing import Iterable, Union
@@ -129,8 +128,11 @@ def render_local_tree(path_state_key, key_prefix, selected_key):
                 st.session_state[path_state_key] = full_path
                 st.rerun()
         else:
-            checked = st.checkbox(f"📄 {item}", key=f"{key_prefix}_file_{full_path}",
-                                 value=(full_path in st.session_state[selected_key]))
+            checked = st.checkbox(
+                f"📄 {item}",
+                key=f"{key_prefix}_file_{full_path}",
+                value=(full_path in st.session_state[selected_key]),
+            )
             if checked:
                 if full_path not in st.session_state[selected_key]:
                     st.session_state[selected_key].append(full_path)
@@ -138,25 +140,28 @@ def render_local_tree(path_state_key, key_prefix, selected_key):
                 if full_path in st.session_state[selected_key]:
                     st.session_state[selected_key].remove(full_path)
 
-
 # ------------------------------------------
-# Remote Tree Renderer
+# Remote Tree Renderer (matching local UI style)
 # ------------------------------------------
 
-def render_remote_tree(remote_host: str, path_state_key: str, key_prefix: str):
+def render_remote_tree(remote_host: str, path_state_key: str, key_prefix: str, selected_key: str):
     current_path = pathresolver(st.session_state.get(path_state_key, "/"), remote_os=remote_os)
     st.session_state[path_state_key] = current_path
 
-    parent = pathresolver(posixpath.dirname(current_path), remote_os=remote_os)
+    # parent using remote OS rules
+    pmod = ntpath if remote_os.lower().startswith("win") else posixpath
+    parent_raw = pmod.dirname(current_path)
+    parent = pathresolver(parent_raw, remote_os=remote_os)
 
     cols = st.columns([1, 9])
     with cols[0]:
         if parent != current_path and st.button("⬆️", key=f"{key_prefix}_up", help="Up"):
-            st.session_state[path_state_key] = parent
+            st.session_state[path_state_key] = parent or "/"
             st.rerun()
     with cols[1]:
         st.markdown(f"**`{remote_host}:{current_path}`**")
 
+    # List remote directory
     result = remote_listdir(remote_host, current_path)
     if result.get("status") != "success":
         st.error(result.get("message"))
@@ -167,13 +172,40 @@ def render_remote_tree(remote_host: str, path_state_key: str, key_prefix: str):
         st.info(f"📄 {info.get('path')} ({info.get('size', 0)} bytes)")
         return
 
-    files = result.get("files", [])
-    for item in files:
-        full_path = pathresolver([current_path, item], remote_os=remote_os)
-        if st.button(f"{item}", key=f"{key_prefix}_{full_path}", use_container_width=True):
-            st.session_state[path_state_key] = full_path
-            st.rerun()
+    items = result.get("files", [])
+    if not items:
+        st.info("📂 Empty directory")
+        return
 
+    st.session_state.setdefault(selected_key, [])
+
+    # Attempt to determine if items are directories or files
+    # by checking if they have extensions (heuristic)
+    for item in items:
+        full_path = pathresolver([current_path, item], remote_os=remote_os)
+        
+        # Simple heuristic: items without extensions are likely directories
+        # This isn't perfect but matches the local UI pattern better
+        has_extension = "." in item and not item.startswith(".")
+        
+        if not has_extension:
+            # Treat as directory - use button for navigation
+            if st.button(f"📁 {item}", key=f"{key_prefix}_folder_{full_path}"):
+                st.session_state[path_state_key] = full_path
+                st.rerun()
+        else:
+            # Treat as file - use checkbox for selection
+            checked = st.checkbox(
+                f"📄 {item}",
+                key=f"{key_prefix}_file_{full_path}",
+                value=(full_path in st.session_state[selected_key]),
+            )
+            if checked:
+                if full_path not in st.session_state[selected_key]:
+                    st.session_state[selected_key].append(full_path)
+            else:
+                if full_path in st.session_state[selected_key]:
+                    st.session_state[selected_key].remove(full_path)
 
 # ------------------------------------------
 # Initial Session State
@@ -182,6 +214,7 @@ def render_remote_tree(remote_host: str, path_state_key: str, key_prefix: str):
 st.session_state.setdefault("local_path", str(Path.home()))
 st.session_state.setdefault("selected_local_files", [])
 st.session_state.setdefault("remote_path", "/")
+st.session_state.setdefault("selected_remote_files", [])
 
 if "REMOTE_HOST" not in st.session_state and remote_host:
     st.session_state["REMOTE_HOST"] = remote_host
@@ -212,6 +245,7 @@ with col_local:
     render_local_tree("local_path", "local", "selected_local_files")
     st.divider()
     if st.session_state.selected_local_files:
+        st.info(f"Selected local: {len(st.session_state.selected_local_files)} file(s)")
         if st.button("📤 Send to Remote", use_container_width=True):
             resp = send_files_to_remote(
                 st.session_state["REMOTE_HOST"],
@@ -223,7 +257,7 @@ with col_local:
                     st.success("Transfer complete!")
                 else:
                     st.error(str(data))
-            except:
+            except Exception:
                 st.error("Invalid server response!")
 
 with col_remote:
@@ -231,5 +265,10 @@ with col_remote:
     render_remote_tree(
         st.session_state["REMOTE_HOST"],
         "remote_path",
-        "remote"
+        "remote",
+        "selected_remote_files",
     )
+    st.divider()
+    if st.session_state.selected_remote_files:
+        st.info(f"Selected remote: {len(st.session_state.selected_remote_files)} item(s)")
+        # Future: download/delete actions can hook into selected_remote_files here
