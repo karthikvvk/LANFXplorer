@@ -51,7 +51,7 @@ async def main() -> None:
     port = env.get("port") or 4433
     src_dir = env.get("src") or ""  # optional convenience
     # For now we always connect "insecure" (self-signed cert typical in your tests)
-    insecure = True
+    insecure = False
 
     if not dest_host or dest_host == "0.0.0.0":
         print("[sender] ERROR: DEST_HOST must be set in .env (or RECIVHOST cannot be 0.0.0.0)")

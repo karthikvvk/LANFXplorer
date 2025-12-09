@@ -193,7 +193,7 @@ def send_files():#ip=None):
 
         async def _do_send():
             # For now we use insecure=True assuming self-signed
-            conn = await quic_connect(host=remote_host, port=port, insecure=True)
+            conn = await quic_connect(host=remote_host, port=port, insecure=False)
             try:
                 for path in valid_files:
                     await send_file(conn, path)

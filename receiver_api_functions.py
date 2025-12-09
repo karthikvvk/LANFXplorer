@@ -102,6 +102,7 @@ async def _handle_stream(
 
         # Send ACK
         writer.write(b"OK")
+        al = True
         await writer.drain()
 
     except asyncio.IncompleteReadError:
@@ -114,8 +115,9 @@ async def _handle_stream(
     finally:
         try:
             # Send ACK
-            writer.write(b"OK")
-            await writer.drain()
+            if al:
+                writer.write(b"OK")
+                await writer.drain()
 
             # proper QUIC bidirectional end, prevents ACK loss
             writer.write_eof()
