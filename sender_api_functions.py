@@ -125,17 +125,37 @@ async def send_file(
     Send a file over a new QUIC bidirectional stream on an existing connection.
 
     - Keeps the QUIC connection open.
-    - Encodes the original filename in the stream header so the receiver can
-      save it with that name.
-
-    :param connection: QuicSenderConnection returned by `quic_connect`.
-    :param file_path: Path to the file on the local filesystem.
+    - Encodes the filename (optionally with relative directory) in the stream
+      header so the receiver can save it with that path under its save_dir.
     """
     abs_path = os.path.abspath(file_path)
-    filename = os.path.basename(abs_path)
+
+    if not os.path.isfile(abs_path):
+        # optional: raise or just return
+        # raise FileNotFoundError(abs_path)
+        return
+
+    # -------- NEW PART: decide what goes into the header --------
+    # Try to send a path relative to the sender's CWD.
+    # If that doesn't make sense (outside tree), fall back to basename.
+    try:
+        cwd = os.getcwd()
+        rel_path = os.path.relpath(abs_path, cwd)
+    except Exception:
+        rel_path = os.path.basename(abs_path)
+
+    # If rel_path escapes upwards ("../"), just use basename
+    if rel_path.startswith(".."):
+        header_name = os.path.basename(abs_path)
+    else:
+        header_name = rel_path
+
+    # Normalize for cross-platform
+    header_name = header_name.replace("\\", "/")
+    # ------------------------------------------------------------
 
     filesize = os.path.getsize(abs_path)
-    header = _build_header(filename, filesize)
+    header = _build_header(header_name, filesize)
 
     reader, writer = await connection.protocol.create_stream()
 
@@ -156,11 +176,10 @@ async def send_file(
     # Optional: read ACK (if receiver sends "OK")
     try:
         ack = await reader.read(1024)
-        # You can log or inspect ACK here if you want
-        # e.g. print(f"ACK for {filename}: {ack!r}")
+        # handle/log ack if you want
     except Exception:
-        # Ignore ACK errors for now
         pass
+
 
 
 async def send_bytes(

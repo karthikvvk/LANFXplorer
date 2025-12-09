@@ -81,6 +81,9 @@ async def _handle_stream(
         os.makedirs(base_dir, exist_ok=True)
         path = os.path.join(base_dir, filename)
 
+        parent_dir = os.path.dirname(path)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
         # 4) Read remaining bytes until EOF and write to file
         bytes_written = 0
         with open(path, "wb") as f:
