@@ -64,7 +64,10 @@ def gethostlist():
     file_path = os.path.join(pwd, "ipsn.txt")
     
     if system_name.startswith("lin"):
-        return scanfromlinux()
+        # return scanfromlinux()
+        # lis = scanfromlinux().append("10.150.130.23")
+        lis = ["10.150.130.23"]
+        return lis
     elif system_name.startswith("win") or system_name.startswith("nt"):
         return scanfromwin()
     else:

@@ -245,6 +245,11 @@ st.session_state.setdefault("selected_local_files", [])
 st.session_state.setdefault("remote_path", "/")
 st.session_state.setdefault("selected_remote_files", [])
 
+
+st.session_state.setdefault("send_pending", False)
+st.session_state.setdefault("download_pending", False)
+
+
 if "REMOTE_HOST" not in st.session_state and remote_host:
     st.session_state["REMOTE_HOST"] = remote_host
 
@@ -276,12 +281,19 @@ with col_local:
     
     st.info(f"Selected: {len(st.session_state.selected_local_files)} file(s)")
     
+    # 1) Button only sets flag + rerun
     if st.button(
         "📤 Send to Remote", 
         use_container_width=True,
         disabled=len(st.session_state.selected_local_files) == 0,
-        help="Send selected local files to remote peer"
+        help="Send selected local files to remote peer",
+        key="send_to_remote_btn"
     ):
+        st.session_state["send_pending"] = True
+        st.rerun()
+
+    # 2) After navigation/rerun, do the actual send here
+    if st.session_state.get("send_pending", False):
         with st.spinner("Sending files..."):
             resp = send_files_to_remote(
                 st.session_state["REMOTE_HOST"],
@@ -290,13 +302,18 @@ with col_local:
             try:
                 data = resp.json()
                 if data.get("status") == "success":
-                    st.success(f"✅ Sent {len(data.get('sent', []))} file(s)")
+                    sent_files = data.get("sent", [])
+                    st.success(f"✅ Sent {len(sent_files)} file(s)")
+                    # clear selection
                     st.session_state["selected_local_files"] = []
-                    st.rerun()
                 else:
                     st.error(f"❌ {data.get('message', 'Transfer failed')}")
             except Exception as e:
                 st.error(f"❌ Invalid response: {e}")
+        
+        # clear flag and rerun to stabilise UI
+        st.session_state["send_pending"] = False
+        st.rerun()
 
 with col_remote:
     st.subheader("📡 Remote Files")
@@ -310,14 +327,20 @@ with col_remote:
     
     st.info(f"Selected: {len(st.session_state.selected_remote_files)} file(s)")
     
+    # 1) Button only sets flag + rerun
     if st.button(
         "📥 Download to Local", 
         use_container_width=True,
         disabled=len(st.session_state.selected_remote_files) == 0,
-        help="Download selected remote files to current local directory"
+        help="Download selected remote files to current local directory",
+        key="download_to_local_btn"
     ):
+        st.session_state["download_pending"] = True
+        st.rerun()
+
+    # 2) After navigation/rerun, do the actual P2P request
+    if st.session_state.get("download_pending", False):
         with st.spinner("Requesting files from remote..."):
-            # P2P Swap: Tell remote to send files to us
             resp = receive_files_from_remote(
                 st.session_state["REMOTE_HOST"],
                 st.session_state["selected_remote_files"]
@@ -325,11 +348,19 @@ with col_remote:
             try:
                 data = resp.json()
                 if data.get("status") == "success":
+                    remote_resp = data.get("remote_response", {}) or {}
+                    sent_files = remote_resp.get("sent", [])
                     local_path = st.session_state.get("local_path", "~")
-                    st.success(f"✅ Downloaded {len(data.get('sent', []))} file(s) to {local_path}")
+                    st.success(
+                        f"✅ Downloaded {len(sent_files)} file(s) to {local_path}"
+                    )
+                    # clear remote selection
                     st.session_state["selected_remote_files"] = []
-                    st.rerun()
                 else:
                     st.error(f"❌ {data.get('message', 'Transfer failed')}")
             except Exception as e:
                 st.error(f"❌ Invalid response: {e}")
+
+        # clear flag and rerun to stabilise UI
+        st.session_state["download_pending"] = False
+        st.rerun()

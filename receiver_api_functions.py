@@ -71,7 +71,7 @@ async def _handle_stream(
         # 2) Read filename bytes
         filename_bytes = await reader.readexactly(name_len)
         filename = filename_bytes.decode("utf-8")
-
+        filename = os.path.basename(filename) 
         # 3) Read filesize (8 bytes)
         raw = await reader.readexactly(8)
         (filesize,) = struct.unpack("!Q", raw)
@@ -113,8 +113,14 @@ async def _handle_stream(
         pass
     finally:
         try:
-            writer.close()
-            await writer.wait_closed()
+            # Send ACK
+            writer.write(b"OK")
+            await writer.drain()
+
+            # proper QUIC bidirectional end, prevents ACK loss
+            writer.write_eof()
+            await writer.drain()
+
         except Exception:
             pass
 
