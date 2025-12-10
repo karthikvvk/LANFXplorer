@@ -2,10 +2,10 @@
 import asyncio
 import os
 import sys
-
+from elevate import elevate
 from startsetup import load_env_vars
 from receiver_api_functions import start_receiver, stop_receiver
-
+elevate()
 
 def on_file_received(filepath: str, filesize: int) -> None:
     """

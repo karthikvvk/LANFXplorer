@@ -6,3 +6,7 @@ dotenv
 elevate
 scapy
 ipaddress
+ownca
+cryptography
+pyOpenSSL
+service-identity

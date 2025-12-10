@@ -19,8 +19,8 @@ cidr = None
 port = 4433
 out_dir = pwd
 src_dir = pwd
-key = os.path.join(pwd, "key.pem")
-certi = os.path.join(pwd, "cert.pem")
+key = os.path.join(pwd, "pkica_export", "peers", "muruga.lanfx.local", "key.pem")
+certi = os.path.join(pwd, "pkica_export", "peers", "muruga.lanfx.local", "cert.pem")
 dest_host = ""
 reciv_host = "0.0.0.0"
 
