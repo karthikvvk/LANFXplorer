@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID, ExtendedKeyUsageOID
 
-
+os.system("pip install --upgrade pip && pip install --upgrade cryptography pyOpenSSL service-identity")
 def get_project_root() -> Path:
     script_path = Path(__file__).resolve()
     project_root = script_path.parent
