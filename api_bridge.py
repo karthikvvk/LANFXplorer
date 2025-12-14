@@ -111,41 +111,87 @@ def list_directory():
     POST body: {"path": "/absolute/path"}
     """
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         path = data.get("path")
-        
+
         if not path:
             return jsonify({"status": "error", "message": "path is required"}), 400
 
         path = os.path.normpath(path)
 
         if not os.path.exists(path):
-            return jsonify({"status": "error", "message": f"Path does not exist: {path}"}), 404
+            return jsonify({
+                "status": "error",
+                "message": f"Path does not exist: {path}"
+            }), 404
 
+        # ---------------- FILE ----------------
         if os.path.isfile(path):
             st = os.stat(path)
             info = {
                 "name": os.path.basename(path),
                 "path": path,
+                "is_directory": False,
                 "size": st.st_size,
                 "mtime": datetime.utcfromtimestamp(st.st_mtime).isoformat() + "Z",
             }
-            return jsonify({"status": "success", "type": "file", "info": info}), 200
+            return jsonify({
+                "status": "success",
+                "type": "file",
+                "info": info
+            }), 200
 
+        # --------------- DIRECTORY ---------------
         if os.path.isdir(path):
+            files = []
+
             try:
-                items = sorted(os.listdir(path))
+                entries = sorted(os.listdir(path))
             except PermissionError:
-                return jsonify({"status": "error", "message": "Permission denied"}), 403
-            except Exception as e:
-                return jsonify({"status": "error", "message": f"Listing failed: {str(e)}"}), 500
+                return jsonify({
+                    "status": "error",
+                    "message": "Permission denied"
+                }), 403
 
-            return jsonify({"status": "success", "type": "directory", "files": items}), 200
+            for name in entries:
+                full_path = os.path.join(path, name)
 
-        return jsonify({"status": "error", "message": f"Unknown filesystem object: {path}"}), 400
+                try:
+                    st = os.stat(full_path)
+                    is_dir = os.path.isdir(full_path)
+
+                    files.append({
+                        "name": name,
+                        "path": full_path,
+                        "is_directory": is_dir,
+                        "size": None if is_dir else st.st_size,
+                        "mtime": datetime.utcfromtimestamp(
+                            st.st_mtime
+                        ).isoformat() + "Z",
+                    })
+                except PermissionError:
+                    # Skip unreadable entries silently
+                    continue
+                except FileNotFoundError:
+                    # Race condition (deleted between list/stat)
+                    continue
+
+            return jsonify({
+                "status": "success",
+                "type": "directory",
+                "files": files
+            }), 200
+
+        return jsonify({
+            "status": "error",
+            "message": f"Unknown filesystem object: {path}"
+        }), 400
 
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
 
 
@@ -193,7 +239,7 @@ def send_files():#ip=None):
 
         async def _do_send():
             # For now we use insecure=True assuming self-signed
-            conn = await quic_connect(host=remote_host, port=port, insecure=False)
+            conn = await quic_connect(host=remote_host, port=port, insecure=True,  server_name=os.environ.get("SERVER_NAME"))
             try:
                 for path in valid_files:
                     await send_file(conn, path)
