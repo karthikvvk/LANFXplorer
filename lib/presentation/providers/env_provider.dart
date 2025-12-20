@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import '../../data/models/app_env.dart';
+import '../../data/services/api_service.dart';
 import '../../data/services/env_loader.dart';
 
 class EnvProvider extends ChangeNotifier {
+  final ApiService _apiService;
   AppEnv? _env;
+
+  EnvProvider(this._apiService);
 
   AppEnv? get env => _env;
   bool get isLoaded => _env != null;
@@ -13,5 +17,14 @@ class EnvProvider extends ChangeNotifier {
 
     _env = await EnvLoader.load();
     notifyListeners();
+  }
+
+  Future<void> updateDestHost(String host) async {
+    if (_env == null) return;
+    _env = _env!.copyWith(destHost: host);
+    notifyListeners();
+
+    // Sync with backend
+    await _apiService.updateEnv('DEST_HOST', host);
   }
 }

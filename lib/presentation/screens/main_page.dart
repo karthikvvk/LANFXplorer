@@ -4,6 +4,7 @@ import 'package:files/presentation/components/drag_drop_zone.dart';
 import 'package:files/presentation/components/file_item_card.dart';
 import 'package:files/presentation/components/theme_toggle_button.dart';
 import 'package:files/presentation/components/transfer_status_widget.dart';
+import 'package:files/presentation/providers/env_provider.dart';
 import 'package:files/presentation/providers/file_system_provider.dart';
 import 'package:files/presentation/providers/session_provider.dart';
 import 'package:files/presentation/providers/transfer_provider.dart';
@@ -26,23 +27,22 @@ class _MainPageState extends State<MainPage> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<FileSystemProvider>().loadLocalFiles();
-      
-      final session = context.read<SessionProvider>();
-      final destIp = session.destinationMachine?.ipAddress;
-      
+
+      final envProvider = context.read<EnvProvider>();
+      final destIp = envProvider.env?.destHost;
+
       AppLogger.info('MainPage: Initializing. Destination IP: $destIp');
 
       context.read<FileSystemProvider>().loadRemoteFiles(
-        null, 
-        destIp,
-      );
+            null,
+            destIp,
+          );
     });
   }
 
   Future<void> _onSendToDest() async {
     final fileSystemProvider = context.read<FileSystemProvider>();
     final transferProvider = context.read<TransferProvider>();
-    final sessionProvider = context.read<SessionProvider>();
     final selectedFiles = fileSystemProvider.selectedLocalFiles;
 
     if (selectedFiles.isEmpty) {
@@ -50,8 +50,8 @@ class _MainPageState extends State<MainPage> {
       return;
     }
 
-    final destId = sessionProvider.destinationMachine?.id;
-    if (destId == null) {
+    final destId = context.read<EnvProvider>().env?.destHost;
+    if (destId == null || destId.isEmpty) {
       _showSnackBar('No destination machine connected');
       return;
     }
@@ -70,7 +70,6 @@ class _MainPageState extends State<MainPage> {
   Future<void> _onFetchFromDest() async {
     final fileSystemProvider = context.read<FileSystemProvider>();
     final transferProvider = context.read<TransferProvider>();
-    final sessionProvider = context.read<SessionProvider>();
     final selectedFiles = fileSystemProvider.selectedRemoteFiles;
 
     if (selectedFiles.isEmpty) {
@@ -78,8 +77,8 @@ class _MainPageState extends State<MainPage> {
       return;
     }
 
-    final sourceId = sessionProvider.destinationMachine?.id;
-    if (sourceId == null) {
+    final sourceId = context.read<EnvProvider>().env?.destHost;
+    if (sourceId == null || sourceId.isEmpty) {
       _showSnackBar('No source machine connected');
       return;
     }

@@ -64,6 +64,7 @@ class FileSystemProvider extends ChangeNotifier {
     notifyListeners();
 
     if (path != null) _remoteCurrentPath = path;
+    if (host != null) _remoteHost = host;
 
     try {
       if (_apiService != null) {

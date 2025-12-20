@@ -47,6 +47,7 @@ class _LandingPageState extends State<LandingPage> {
   }
 
   void _onMachineSelected(Machine machine) {
+    context.read<EnvProvider>().updateDestHost(machine.ipAddress);
     context.read<SessionProvider>().startSession(machine);
     context.push('/main');
   }

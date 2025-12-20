@@ -63,6 +63,22 @@ class ApiService {
     }
   }
 
+  Future<bool> updateEnv(String key, String value) async {
+    try {
+      AppLogger.network('Updating env: $key=$value');
+      final response = await _client.post(
+        Uri.parse('${ApiEndpoints.baseUrl}/update_env'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({key: value}),
+      );
+
+      return response.statusCode == 200;
+    } catch (e) {
+      AppLogger.error('Failed to update env', error: e);
+      return false;
+    }
+  }
+
   Future<List<FileItem>> getFiles(String path, {String? remoteHost}) async {
     final Map<String, dynamic> body = {'path': path};
     if (remoteHost != null) {
@@ -71,7 +87,8 @@ class ApiService {
 
     AppLogger.info('ApiService: Fetching files with body: $body');
     if (remoteHost == null) {
-      AppLogger.warning('ApiService: fetchFiles called with null remoteHost. This will fetch LOCAL files if not backend-handled.');
+      AppLogger.warning(
+          'ApiService: fetchFiles called with null remoteHost. This will fetch LOCAL files if not backend-handled.');
     }
 
     final response = await _client.post(

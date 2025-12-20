@@ -108,6 +108,35 @@ def listhost():
     return jsonify(host_list)
 
 
+@app.route("/update_env", methods=["POST"])
+def update_env_endpoint():
+    """
+    Update environment variables (e.g. DEST_HOST).
+    JSON body: {"DEST_HOST": "1.2.3.4"}
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        if not data:
+            return jsonify({"status": "error", "message": "No data provided"}), 400
+
+        # Validate allowed keys to prevent arbitrary env injection if needed
+        # For now, we allow updating specific keys relevant to the app flow
+        allowed_keys = ["DEST_HOST", "RECIVHOST", "PORT"]
+        
+        updates = {}
+        for k, v in data.items():
+            if k in allowed_keys:
+                os.environ[k] = str(v)
+                updates[k] = str(v)
+                # optionally write to .env file if persistence is needed
+                set_key(ENV_FILE, k, str(v))
+        
+        print(f"[*] Updated environment: {updates}")
+        return jsonify({"status": "success", "updated": updates}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route("/osinfo", methods=["POST"])
 def osinfo():
     """Return OS and user info for this peer"""
@@ -132,6 +161,43 @@ def list_directory():
 
         if not path:
             return jsonify({"status": "error", "message": "path is required"}), 400
+
+        remote_host = data.get("remote_host")
+        # Check if we need to proxy this request
+        if remote_host:
+             # If remote_host is THIS machine, treat as local
+            env = load_env_vars()
+            my_ip = env.get("host")
+            
+            if remote_host != my_ip and remote_host != "127.0.0.1" and remote_host != "localhost":
+                 print(f"[*] Proxying listdir request for {path} to {remote_host}")
+                 try:
+                     # Proxy the request to the remote host
+                     # We forward the same payload but WITHOUT the remote_host field to prevent infinite loops
+                     # in case of misconfiguration, although the check above prevents immediate self-loop.
+                     
+                     proxy_payload = {"path": path} # Only send path
+                     
+                     resp = requests.post(
+                         f"http://{remote_host}:5000/listdir",
+                         json=proxy_payload,
+                         timeout=10
+                     )
+                     
+                     if resp.status_code == 200:
+                         return jsonify(resp.json()), 200
+                     else:
+                         return jsonify({
+                             "status": "error", 
+                             "message": f"Remote host returned {resp.status_code}: {resp.text}"
+                         }), resp.status_code
+                         
+                 except requests.exceptions.RequestException as e:
+                     print(f"[!] Proxy failed: {e}")
+                     return jsonify({
+                         "status": "error", 
+                         "message": f"Failed to contact remote host {remote_host}: {str(e)}"
+                     }), 502
 
         path = os.path.normpath(path)
 

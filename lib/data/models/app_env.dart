@@ -36,6 +36,44 @@ class AppEnv {
     required this.destHost,
     required this.recivHost,
   });
+
+  AppEnv copyWith({
+    String? host,
+    int? port,
+    String? user,
+    String? system,
+    String? interface,
+    String? subnet,
+    String? gateway,
+    String? broadcast,
+    String? outDir,
+    String? srcDir,
+    String? certi,
+    String? key,
+    String? pwd,
+    String? cidr,
+    String? destHost,
+    String? recivHost,
+  }) {
+    return AppEnv(
+      host: host ?? this.host,
+      port: port ?? this.port,
+      user: user ?? this.user,
+      system: system ?? this.system,
+      interface: interface ?? this.interface,
+      subnet: subnet ?? this.subnet,
+      gateway: gateway ?? this.gateway,
+      broadcast: broadcast ?? this.broadcast,
+      outDir: outDir ?? this.outDir,
+      srcDir: srcDir ?? this.srcDir,
+      certi: certi ?? this.certi,
+      key: key ?? this.key,
+      pwd: pwd ?? this.pwd,
+      cidr: cidr ?? this.cidr,
+      destHost: destHost ?? this.destHost,
+      recivHost: recivHost ?? this.recivHost,
+    );
+  }
 }
 
 class AppEnvScope extends InheritedWidget {

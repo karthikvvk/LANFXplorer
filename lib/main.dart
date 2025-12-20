@@ -25,7 +25,7 @@ class MyApp extends StatelessWidget {
       providers: [
         Provider<ApiService>.value(value: apiService),
 
-        ChangeNotifierProvider(create: (_) => EnvProvider()),
+        ChangeNotifierProvider(create: (_) => EnvProvider(apiService)),
         ChangeNotifierProvider(create: (_) => SessionProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => NetworkProvider(apiService)),
