@@ -68,25 +68,6 @@ def start_peer_discovery():
     except Exception as e:
         print(f"[-] Failed to start peer discovery: {e}")
 
-# ----------------- Peer Discovery Responder ----------------- #
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -276,8 +257,6 @@ def list_directory():
         }), 500
 
 
-
-# ---------- NEW: trigger non-interactive QUIC send ----------
 @app.route("/send_files", methods=["POST"])
 def send_files():#ip=None):
     """
@@ -375,8 +354,6 @@ def pki_info():
     return {"has_ca": False}, 200
 
 
-
-
 @app.route("/receive_files", methods=["POST"])
 def receive_files():
     """
@@ -444,7 +421,6 @@ def receive_files():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-
 @app.route('/peers', methods=['GET'])
 def list_peers():
     """List known peers and their trust status."""
@@ -456,17 +432,12 @@ def list_peers():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-
-
 @app.route("/pki/ca", methods=["GET"])
 def fetch_ca():
     ca_path = os.environ.get("CA_CERT")
     if not ca_path or not os.path.exists(ca_path):
         return {"error": "CA not initialized"}, 404
     return send_file(ca_path)
-
-
-
 
 
 @app.route('/peers/approve', methods=['POST'])

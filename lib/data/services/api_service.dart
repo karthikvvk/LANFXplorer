@@ -84,7 +84,6 @@ class ApiService {
     if (remoteHost != null) {
       body['remote_host'] = remoteHost;
     }
-
     AppLogger.info('ApiService: Fetching files with body: $body');
     if (remoteHost == null) {
       AppLogger.warning(

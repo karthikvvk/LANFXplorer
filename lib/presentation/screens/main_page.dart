@@ -26,7 +26,7 @@ class _MainPageState extends State<MainPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<FileSystemProvider>().loadLocalFiles();
+      context.read<FileSystemProvider>().loadLocalFiles(".");
 
       final envProvider = context.read<EnvProvider>();
       final destIp = envProvider.env?.destHost;
@@ -34,7 +34,7 @@ class _MainPageState extends State<MainPage> {
       AppLogger.info('MainPage: Initializing. Destination IP: $destIp');
 
       context.read<FileSystemProvider>().loadRemoteFiles(
-            null,
+            ".",
             destIp,
           );
     });
