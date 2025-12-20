@@ -5,7 +5,7 @@ import sys
 from elevate import elevate
 from startsetup import load_env_vars
 from receiver_api_functions import start_receiver, stop_receiver
-elevate()
+# elevate()
 
 def on_file_received(filepath: str, filesize: int) -> None:
     """
@@ -22,6 +22,7 @@ async def main() -> None:
     port = env.get("port") or 4433
     cert_path = env.get("certi") or "cert.pem"
     key_path = env.get("key") or "key.pem"
+    ca_cert = "/home/muruga/workspace/quic_explorer/stable_v2/lanfxplorer/pkica_export/ca.pem"#env.get("ca_cert") or env.get("CA_CERT")# or None
     out_dir = env.get("out_dir") or os.getcwd()
 
     # Basic checks
@@ -43,12 +44,30 @@ async def main() -> None:
     print(f"          KEY={key_path}")
     print(f"          OUTDIR={out_dir}")
 
+    # Initialize CA Manager to handle CA duties if we are the CA
+    from pki.ca_service import CAManager
+    
+    # We use current directory as cert directory, same as startsetup.py
+    # CAManager needs the actual IP to advertise itself, not 0.0.0.0
+    ca_ip = env.get("host") or recivhost
+    ca_mgr = CAManager(ca_ip, os.getcwd())
+    
+    # Check if we are CA and start service if so
+    if ca_mgr.check_ca_status():
+        print(f"[receiver] CA keys found in {os.getcwd()}. Starting CA Service (Signing + Discovery)...")
+        print(f"[receiver] CA will be advertised at {ca_ip}")
+        await ca_mgr.start_ca_service()
+    else:
+        print("[receiver] No CA keys found locally. Running as standard peer.")
+
     # Start the QUIC receiver using the API
     server = await start_receiver(
         host=recivhost,
         port=port,
         certificate=cert_path,
         private_key=key_path,
+        ca_cert=ca_cert,
+        require_client_cert=True,
         on_file_received=on_file_received,
         save_dir=out_dir,
     )

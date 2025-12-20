@@ -50,11 +50,16 @@ async def main() -> None:
     dest_host = env.get("dest_host") or env.get("recivhost") or "127.0.0.1"
     port = env.get("port") or 4433
     src_dir = env.get("src") or ""  # optional convenience
-    # For now we always connect "insecure" (self-signed cert typical in your tests)
-    insecure = False
+    ca_cert = env.get("CA_CERT")
+    client_cert = env.get("CLIENT_CERT")
+    client_key = env.get("CLIENT_KEY")
 
     if not dest_host or dest_host == "0.0.0.0":
         print("[sender] ERROR: DEST_HOST must be set in .env (or RECIVHOST cannot be 0.0.0.0)")
+        sys.exit(1)
+
+    if not ca_cert:
+        print("[sender] ERROR: CA_CERT must be set in .env for secure connections")
         sys.exit(1)
 
     if src_dir:
@@ -67,12 +72,16 @@ async def main() -> None:
     print(f"          DEST_HOST={dest_host}")
     print(f"          PORT={port}")
     print(f"          SRCDIR={src_dir or '(none)'}")
+    print(f"          CA_CERT={ca_cert}")
 
     # Establish QUIC connection using the API
     connection = await quic_connect(
         host=dest_host,
         port=port,
-        insecure=insecure,
+        insecure=False,  # Always verify
+        client_cert=client_cert,
+        client_key=client_key,
+        ca_cert=ca_cert,
         server_name=None,  # will default to host
     )
 

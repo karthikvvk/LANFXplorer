@@ -10,3 +10,4 @@ ownca
 cryptography
 pyOpenSSL
 service-identity
+bcrypt

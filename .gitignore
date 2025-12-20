@@ -4,4 +4,7 @@
 send_files/
 received_files/
 dump/
-__pycache__/
+*__pycache__/
+*.key
+.vscode/
+./pkica_export/

@@ -10,6 +10,8 @@ import platform
 import getpass
 import asyncio  # NEW
 from sender_api_functions import quic_connect, send_file, close_connection  # NEW
+from pki.store import PeerStore
+from pki.utils import fingerprint_pem, load_cert_pem
 
 
 app = Flask(__name__)
@@ -19,35 +21,56 @@ ENV_FILE = ".env"
 CORS(app, resources={r"/*": {"origins":"*"}})
 
 
+# ----------------- Peer Discovery Responder ----------------- #
+import threading
 
+class PeerDiscoveryResponder(threading.Thread):
+    def __init__(self):
+        super().__init__()
+        self.daemon = True
+        self.running = True
+        self.discovery_port = 4436
+        self.discovery_msg = b"WHO_IS_PEER"
+        self.response_prefix = b"I_AM_PEER"
+        env = load_env_vars()
+        self.host_ip = env.get("host", "0.0.0.0")
 
-def check_subnet(ip):
-    env = load_env_vars()
-    host_ip = env["host"]
-    if not host_ip:
-        raise ValueError("HOST environment variable not set")
+    def run(self):
+        print(f"[*] Starting Peer Discovery Responder on UDP {self.discovery_port}...")
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # On Linux, SO_REUSEPORT allows multiple processes to bind to the same port
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            except AttributeError:
+                pass # Not available on all platforms
+                
+            try:
+                sock.bind(('0.0.0.0', self.discovery_port))
+            except Exception as e:
+                print(f"[!] Peer Discovery Bind Failed: {e}")
+                return
 
-    ip_parts = ip.strip().split('.')
-    default_parts = host_ip.strip().split('.')
-    ed = ip_parts[-1]
-    
-    if ed == '1' or ed == "200" or ed == "255":
-        return False
-    
-    return ip_parts[:-1] == default_parts[:-1]
+            while self.running:
+                try:
+                    data, addr = sock.recvfrom(1024)
+                    if data == self.discovery_msg:
+                        # Respond with I_AM_PEER <HOST_IP>
+                        response = f"{self.response_prefix.decode()} {self.host_ip}".encode()
+                        sock.sendto(response, addr)
+                except Exception as e:
+                    print(f"[!] Peer Discovery Error: {e}")
 
-
-def get_OS_TYPE(REMOTE_HOST=""):
+def start_peer_discovery():
     try:
-        response = requests.post(f"http://{REMOTE_HOST}:5000/osinfo", 
-                                json={"request": "osinfo"})
-        if response.status_code == 200:
-            data = response.json()
-            return {"os": data.get("os", "linux"), "user": data.get("user")}
-        else:
-            return {"os": "linux", "user": None}
-    except:
-        return {"os": "linux", "user": None}
+        t = PeerDiscoveryResponder()
+        t.start()
+    except Exception as e:
+        print(f"[-] Failed to start peer discovery: {e}")
+
+# ----------------- Peer Discovery Responder ----------------- #
+
+
 
 
 
@@ -78,18 +101,11 @@ def listhost():
     host = env["host"]
     
     host_list = gethostlist()
-    result = []
     
-    print(host_list)
-    for ip in host_list:
-        subck = check_subnet(ip)
-        print(subck)
-        if subck:
-            res = get_OS_TYPE(ip)
-            username = res.get("user")
-            result.append({"host": ip, "user": username, "os": res.get("os", "linux")})
+    # print(host_list)
+    
 
-    return jsonify(result)
+    return jsonify(host_list)
 
 
 @app.route("/osinfo", methods=["POST"])
@@ -238,8 +254,29 @@ def send_files():#ip=None):
             return jsonify({"status": "error", "message": "no valid files to send", "missing": missing}), 400
 
         async def _do_send():
-            # For now we use insecure=True assuming self-signed
-            conn = await quic_connect(host=remote_host, port=port, insecure=True,  server_name=os.environ.get("SERVER_NAME"))
+            # For now read client cert & key (optional) and ca (required)
+            env = load_env_vars()
+            client_cert = env.get("CLIENT_CERT")
+            client_key = env.get("CLIENT_KEY")
+            ca_cert = env.get("CA_CERT")
+
+            # SECURITY FIX: Enforce TLS verification
+            if not ca_cert:
+                raise ValueError(
+                    "CA_CERT environment variable not set. "
+                    "Cannot verify server certificate. "
+                    "Set CA_CERT to enable secure connections."
+                )
+
+            conn = await quic_connect(
+                host=remote_host,
+                port=port,
+                insecure=False,  # ALWAYS verify server certificate
+                server_name=os.environ.get("SERVER_NAME"),
+                client_cert=client_cert,
+                client_key=client_key,
+                ca_cert=ca_cert,
+            )
             try:
                 for path in valid_files:
                     await send_file(conn, path)
@@ -258,6 +295,18 @@ def send_files():#ip=None):
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/pki/info", methods=["GET"])
+def pki_info():
+    ca_path = os.environ.get("CA_CERT")
+    if ca_path and os.path.exists(ca_path):
+        pem = open(ca_path).read()
+        return {
+            "has_ca": True,
+            "fingerprint": fingerprint_pem(pem)
+        }, 200
+    return {"has_ca": False}, 200
 
 
 
@@ -330,5 +379,75 @@ def receive_files():
 
 
 
+@app.route('/peers', methods=['GET'])
+def list_peers():
+    """List known peers and their trust status."""
+    try:
+        store = PeerStore()
+        peers = store.list_peers()
+        return jsonify({"status": "success", "peers": peers}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+
+
+@app.route("/pki/ca", methods=["GET"])
+def fetch_ca():
+    ca_path = os.environ.get("CA_CERT")
+    if not ca_path or not os.path.exists(ca_path):
+        return {"error": "CA not initialized"}, 404
+    return send_file(ca_path)
+
+
+
+
+
+@app.route('/peers/approve', methods=['POST'])
+def approve_peer():
+    try:
+        data = request.get_json() or {}
+        fp = data.get('fingerprint')
+        password = data.get('password')
+        if not fp:
+            return jsonify({'status': 'error', 'message': 'fingerprint required'}), 400
+        store = PeerStore()
+        store.approve_peer(fp, password=password)
+        return jsonify({'status': 'success', 'fingerprint': fp}), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/peers/reject', methods=['POST'])
+def reject_peer():
+    try:
+        data = request.get_json() or {}
+        fp = data.get('fingerprint')
+        if not fp:
+            return jsonify({'status': 'error', 'message': 'fingerprint required'}), 400
+        store = PeerStore()
+        store.reject_peer(fp)
+        return jsonify({'status': 'success', 'fingerprint': fp}), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/peers/verify', methods=['POST'])
+def verify_peer_password():
+    try:
+        data = request.get_json() or {}
+        fp = data.get('fingerprint')
+        password = data.get('password')
+        if not fp or not password:
+            return jsonify({'status': 'error', 'message': 'fingerprint and password required'}), 400
+        store = PeerStore()
+        ok = store.verify_password(fp, password)
+        return jsonify({'status': 'success', 'verified': bool(ok)}), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+
 if __name__ == "__main__":
+    start_peer_discovery()
     app.run(host='0.0.0.0', port=5000, debug=True)
