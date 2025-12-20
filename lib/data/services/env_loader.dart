@@ -4,8 +4,7 @@ import '../models/app_env.dart';
 
 class EnvLoader {
   static Future<AppEnv> load() async {
-    final envFile =
-        File('/home/muruga/workspace/quic_explorer/stable_v2/lanfxplorer/.env');
+    final envFile = File('.env');
 
     if (!envFile.existsSync()) {
       throw Exception('.env file not found');
