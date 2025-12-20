@@ -20,6 +20,7 @@ class EnvLoader {
       if (idx == -1) continue;
 
       final key = line.substring(0, idx).trim();
+      if (key.isEmpty) continue;
       var value = line.substring(idx + 1).trim();
 
       // strip quotes
@@ -32,7 +33,6 @@ class EnvLoader {
 
       env[key] = value;
     }
-    // print('PARSED ENV MAP: $env');
 
     return AppEnv(
       host: env['HOST'] ?? '',
@@ -47,6 +47,10 @@ class EnvLoader {
       srcDir: env['SRCDIR'] ?? '',
       certi: env['CERTI'] ?? '',
       key: env['KEY'] ?? '',
+      pwd: env['PWD'] ?? '',
+      cidr: env['CIDR'] ?? '',
+      destHost: env['DEST_HOST'] ?? '',
+      recivHost: env['RECIVHOST'] ?? '0.0.0.0',
     );
   }
 }

@@ -13,6 +13,10 @@ class AppEnv {
   final String srcDir;
   final String certi;
   final String key;
+  final String pwd;
+  final String cidr;
+  final String destHost;
+  final String recivHost;
 
   AppEnv({
     required this.host,
@@ -27,6 +31,10 @@ class AppEnv {
     required this.srcDir,
     required this.certi,
     required this.key,
+    required this.pwd,
+    required this.cidr,
+    required this.destHost,
+    required this.recivHost,
   });
 }
 
