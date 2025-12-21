@@ -22,7 +22,7 @@ async def main() -> None:
     port = env.get("port") or 4433
     cert_path = env.get("certi") or "cert.pem"
     key_path = env.get("key") or "key.pem"
-    ca_cert = "/home/muruga/workspace/quic_explorer/stable_v2/lanfxplorer/pkica_export/ca.pem"#env.get("ca_cert") or env.get("CA_CERT")# or None
+    ca_cert = env.get("ca_cert") or env.get("CA_CERT")
     out_dir = env.get("out_dir") or os.getcwd()
 
     # Basic checks

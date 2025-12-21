@@ -268,78 +268,78 @@ def send_files():#ip=None):
       "files": ["/abs/path/1", "/abs/path/2"]
     }
     """
-    try:
-        data = request.get_json() or {}
-        files = data.get("files", [])
-        remote_host = data.get("remote_host")
-        # if ip:
-        #     remote_host = ip
-        if not isinstance(files, list) or not files:
-            return jsonify({"status": "error", "message": "files must be a non-empty list"}), 400
+    # try:
+    data = request.get_json() or {}
+    files = data.get("files", [])
+    remote_host = data.get("remote_host")
+    # if ip:
+    #     remote_host = ip
+    if not isinstance(files, list) or not files:
+        return jsonify({"status": "error", "message": "files must be a non-empty list"}), 400
 
+    env = load_env_vars()
+    if not remote_host:
+        remote_host = env.get("dest_host") or env.get("recivhost") or env.get("host")
+
+    if not remote_host:
+        return jsonify({"status": "error", "message": "remote_host or DEST_HOST/HOST not set"}), 400
+
+    port = env.get("port") or 4433
+
+    # verify files exist
+    valid_files = []
+    missing = []
+    for f in files:
+        if os.path.isfile(f):
+            valid_files.append(f)
+        else:
+            missing.append(f)
+
+    if not valid_files:
+        return jsonify({"status": "error", "message": "no valid files to send", "missing": missing}), 400
+
+    async def _do_send():
+        # For now read client cert & key (optional) and ca (required)
         env = load_env_vars()
-        if not remote_host:
-            remote_host = env.get("dest_host") or env.get("recivhost") or env.get("host")
+        client_cert = env.get("certi")
+        client_key = env.get("key")
+        ca_cert = env.get("ca_cert")
 
-        if not remote_host:
-            return jsonify({"status": "error", "message": "remote_host or DEST_HOST/HOST not set"}), 400
-
-        port = env.get("port") or 4433
-
-        # verify files exist
-        valid_files = []
-        missing = []
-        for f in files:
-            if os.path.isfile(f):
-                valid_files.append(f)
-            else:
-                missing.append(f)
-
-        if not valid_files:
-            return jsonify({"status": "error", "message": "no valid files to send", "missing": missing}), 400
-
-        async def _do_send():
-            # For now read client cert & key (optional) and ca (required)
-            env = load_env_vars()
-            client_cert = env.get("CLIENT_CERT")
-            client_key = env.get("CLIENT_KEY")
-            ca_cert = env.get("CA_CERT")
-
-            # SECURITY FIX: Enforce TLS verification
-            if not ca_cert:
-                raise ValueError(
-                    "CA_CERT environment variable not set. "
-                    "Cannot verify server certificate. "
-                    "Set CA_CERT to enable secure connections."
-                )
-
-            conn = await quic_connect(
-                host=remote_host,
-                port=port,
-                insecure=False,  # ALWAYS verify server certificate
-                server_name=os.environ.get("SERVER_NAME"),
-                client_cert=client_cert,
-                client_key=client_key,
-                ca_cert=ca_cert,
+        # SECURITY FIX: Enforce TLS verification
+        if not ca_cert:
+            raise ValueError(
+                "CA_CERT environment variable not set. "
+                "Cannot verify server certificate. "
+                "Set CA_CERT to enable secure connections."
             )
-            try:
-                for path in valid_files:
-                    await send_file(conn, path)
-            finally:
-                await close_connection(conn)
 
-        asyncio.run(_do_send())
+        conn = await quic_connect(
+            host=remote_host,
+            port=port,
+            insecure=False,  # ALWAYS verify server certificate
+            server_name=os.environ.get("SERVER_NAME"),
+            client_cert=client_cert,
+            client_key=client_key,
+            ca_cert=ca_cert,
+        )
+        try:
+            for path in valid_files:
+                await send_file(conn, path)
+        finally:
+            await close_connection(conn)
 
-        return jsonify({
-            "status": "success",
-            "remote_host": remote_host,
-            "port": port,
-            "sent": valid_files,
-            "missing": missing
-        }), 200
+    asyncio.run(_do_send())
 
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+    return jsonify({
+        "status": "success",
+        "remote_host": remote_host,
+        "port": port,
+        "sent": valid_files,
+        "missing": missing
+    }), 200
+
+    # except Exception as e:
+    #     return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route("/pki/info", methods=["GET"])

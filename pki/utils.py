@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import os
 import hashlib
-from typing import Union
+from typing import Union, List, Optional
+import ipaddress
 from datetime import datetime, timezone
 
 from cryptography import x509
@@ -149,11 +150,13 @@ def get_peer_cert_pem_from_writer(writer) -> str | None:
         return None
 
 
-def generate_csr(private_key_pem: bytes, common_name: str) -> bytes:
+def generate_csr(private_key_pem: bytes, common_name: str, san_dns: Optional[List[str]] = None, san_ips: Optional[List[str]] = None) -> bytes:
     """Generate a Certificate Signing Request (CSR).
     
     :param private_key_pem: Private key bytes (PEM)
     :param common_name: Common Name (CN) for the subject
+    :param san_dns: List of DNS names for SubjectAlternativeName
+    :param san_ips: List of IP addresses (strings) for SubjectAlternativeName
     :return: CSR bytes (PEM)
     """
     from cryptography import x509
@@ -162,9 +165,29 @@ def generate_csr(private_key_pem: bytes, common_name: str) -> bytes:
     
     key = serialization.load_pem_private_key(private_key_pem, password=None)
     
-    csr = x509.CertificateSigningRequestBuilder().subject_name(x509.Name([
+    builder = x509.CertificateSigningRequestBuilder().subject_name(x509.Name([
         x509.NameAttribute(NameOID.COMMON_NAME, common_name),
-    ])).sign(key, hashes.SHA256())
+    ]))
+    
+    # Add SubjectAlternativeName if provided
+    san_list = []
+    if san_dns:
+        for name in san_dns:
+            san_list.append(x509.DNSName(name))
+    if san_ips:
+        for ip in san_ips:
+            try:
+                san_list.append(x509.IPAddress(ipaddress.ip_address(ip)))
+            except ValueError:
+                pass # Ignore invalid IPs
+                
+    if san_list:
+        builder = builder.add_extension(
+            x509.SubjectAlternativeName(san_list),
+            critical=False
+        )
+            
+    csr = builder.sign(key, hashes.SHA256())
     
     return csr.public_bytes(serialization.Encoding.PEM)
 
@@ -187,7 +210,7 @@ def sign_csr(csr_pem: bytes, ca_cert_pem: bytes, ca_key_pem: bytes, days: int = 
     ca_key = serialization.load_pem_private_key(ca_key_pem, password=None)
     
     # Build certificate
-    cert = x509.CertificateBuilder().subject_name(
+    builder = x509.CertificateBuilder().subject_name(
         csr.subject
     ).issuer_name(
         ca_cert.subject
@@ -199,8 +222,46 @@ def sign_csr(csr_pem: bytes, ca_cert_pem: bytes, ca_key_pem: bytes, days: int = 
         datetime.now(timezone.utc)
     ).not_valid_after(
         datetime.now(timezone.utc) + timedelta(days=days)
-    ).add_extension(
+    )
+    
+    # Copy extensions from CSR (e.g. SubjectAlternativeName)
+    for ext in csr.extensions:
+        builder = builder.add_extension(ext.value, critical=ext.critical)
+        
+    # Ensure BasicConstraints is present/overridden if needed (but usually we set it for end-entities)
+    # If the CSR somehow had BasicConstraints, the loop above added it.
+    # But we want to enforce ca=False for this signing function logic
+    # So we remove it if present (complicated in builder) or just add it (might duplicate or error if already exists?).
+    # x509 builder raises error on duplicate extensions.
+    # So we should filter what we copy.
+    
+    # Correct approach: Copy useful extensions (SAN), manually add BasicConstraints.
+    # Re-doing builder logic:
+    
+    builder = x509.CertificateBuilder().subject_name(
+        csr.subject
+    ).issuer_name(
+        ca_cert.subject
+    ).public_key(
+        csr.public_key()
+    ).serial_number(
+        x509.random_serial_number()
+    ).not_valid_before(
+        datetime.now(timezone.utc)
+    ).not_valid_after(
+        datetime.now(timezone.utc) + timedelta(days=days)
+    )
+
+    for ext in csr.extensions:
+        # Skip BasicConstraints as we set it explicitly
+        if isinstance(ext.value, x509.BasicConstraints):
+            continue
+        builder = builder.add_extension(ext.value, critical=ext.critical)
+
+    builder = builder.add_extension(
         x509.BasicConstraints(ca=False, path_length=None), critical=True,
-    ).sign(ca_key, hashes.SHA256())
+    )
+    
+    cert = builder.sign(ca_key, hashes.SHA256())
     
     return cert.public_bytes(serialization.Encoding.PEM)

@@ -194,6 +194,7 @@ def load_env_vars():
     key = os.getenv("KEY", "")
     dest_host = os.getenv("DEST_HOST", "")
     reciv_host = os.getenv("RECIVHOST", "0.0.0.0")
+    ca_cert = os.getenv("CA_CERT", os.path.join(pwd, "ca_cert.pem"))
     
     print(f"[+] Loaded environment variables from .env")
     # print({
@@ -229,7 +230,8 @@ def load_env_vars():
         "broadcast": broadcast_address,
         "cidr": cidr,
         "dest_host": dest_host,
-        "recivhost": reciv_host
+        "recivhost": reciv_host,
+        "ca_cert": ca_cert
     }
 
 
@@ -262,7 +264,8 @@ def write_env():
         "CERTI": certi,
         "KEY": key,
         "DEST_HOST": dest_host,
-        "RECIVHOST": reciv_host
+        "RECIVHOST": reciv_host,
+        "CA_CERT": os.path.join(pwd, "ca_cert.pem")
 
     }
 
@@ -436,7 +439,7 @@ def setup_pki_and_write_env():
             
             # We also need to sign our own client cert (cert_file)
             client_cert = utils.sign_csr(
-                utils.generate_csr(priv_key_pem, f"{user}@{host_ip}"),
+                utils.generate_csr(priv_key_pem, f"{user}@{host_ip}", san_ips=[host_ip]),
                 ca_cert_pem,
                 ca_key_pem
             )

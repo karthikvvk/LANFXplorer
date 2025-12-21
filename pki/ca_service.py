@@ -208,7 +208,7 @@ class CAManager:
 
     async def get_signed_cert(self, private_key_pem: bytes, common_name: str) -> Tuple[bytes, bytes]:
         """Returns (client_cert_pem, ca_cert_pem)"""
-        csr_pem = utils.generate_csr(private_key_pem, common_name)
+        csr_pem = utils.generate_csr(private_key_pem, common_name, san_ips=[self.host])
         
         host, port = self.ca_info
         reader, writer = await asyncio.open_connection(host, port)
