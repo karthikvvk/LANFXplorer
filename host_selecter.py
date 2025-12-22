@@ -20,7 +20,7 @@ host_ip, user, certi, sys, interface, outdir, srcdir, port = (
     env["src"],
     env["port"],
 )
-# Build backend base url strictly from HOST + port
+
 BACKEND = f"http://{host_ip}:5000"
 
 # ---------- UI ----------
@@ -39,14 +39,9 @@ with st.expander("📄 Loaded Environment Values", expanded=False):
         "INTERFACE": interface,
     })
 
-# ---------- Fetch hosts from backend (exact endpoint /listhost) ----------
 @st.cache_data(show_spinner=True)
 def fetch_hosts():
-    """
-    Calls the backend discovery endpoint at /listhost.
-    Returns a list of host entries (or empty list on error).
-    Each host entry is expected to be a dict with keys like "host", "user", "os".
-    """
+   
     try:
         url = f"{BACKEND.rstrip('/')}/listhost"
         r = requests.get(url)
@@ -75,14 +70,12 @@ if not hosts:
 else:
     st.success(f"{len(hosts)} host(s) found.")
 
-# allow manual add if backend empty
 manual_ip = ""
 manual_user = ""
 if not hosts:
     manual_ip = st.text_input("Manual host IP (e.g. 192.168.0.55)", value="")
     manual_user = st.text_input("Manual username (optional)", value="")
 
-# ---------- Host grid + selection ----------
 display_hosts = hosts if hosts else ([{"host": manual_ip, "user": manual_user or "unknown", "os": "unknown"}] if manual_ip else [])
 
 cols = st.columns(3)
@@ -94,12 +87,10 @@ for i, h in enumerate(display_hosts):
     h_user = h.get("user", "unknown")
     btn_label = f"{h_user}@{h_ip} ({h_os})"
     if cols[i % 3].button(btn_label, key=f"host_{i}_{h_ip}"):
-        # Immediately select host + user (no password)
         sel_ip = h_ip
         sel_user = h_user
         sel_os = h_os
 
-        # save to host_list.json for quick reuse (password omitted)
         save_file = Path("host_list.json")
         all_data = []
         if save_file.exists():
@@ -121,14 +112,11 @@ for i, h in enumerate(display_hosts):
             with open(save_file, "w") as f:
                 json.dump(all_data, f, indent=4)
         except Exception:
-            # ignore file write errors (best-effort)
             pass
 
-        # update .env: ONLY DEST_HOST
         try:
             set_key(".env", "DEST_HOST", sel_ip)
         except Exception:
-            # fallback: append/overwrite manually
             try:
                 envp = Path(".env")
                 lines = []
@@ -146,19 +134,13 @@ for i, h in enumerate(display_hosts):
             except Exception:
                 pass
 
-        # set runtime env so other pages can pick it up immediately
         os.environ["DEST_HOST"] = sel_ip
-
-        # immediate override for File Manager page (session-only)
         st.session_state["REMOTE_HOST"] = sel_ip
         st.session_state["REMOTE_USER"] = sel_user
         st.session_state["REMOTE_PASS"] = ""  # no password required
         st.session_state["remote_override_api"] = f"http://{sel_ip}:5000"
         st.session_state["REMOTE_OS"] = sel_os
-
         st.success(f"Selected host {sel_user}@{sel_ip} — DEST_HOST updated.")
-
-        # navigate to file manager (try switch_page, fallback to goto flag)
         try:
             st.switch_page("pages/fs_ui.py")
         except Exception:

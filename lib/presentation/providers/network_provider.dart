@@ -12,6 +12,7 @@ class NetworkProvider extends ChangeNotifier {
 
   List<Machine> get availableMachines => _availableMachines;
   bool get isScanning => _isScanning;
+  ApiService get apiService => _apiService;
 
   Future<void> scanNetwork() async {
     _isScanning = true;

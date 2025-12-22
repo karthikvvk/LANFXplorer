@@ -8,10 +8,7 @@ from sender_api_functions import quic_connect, send_file, close_connection
 
 
 async def interactive_loop(connection, default_src_dir: str | None = None) -> None:
-    """
-    Keep the QUIC connection open and let the user send more files
-    on demand, each on a new stream.
-    """
+
     if default_src_dir:
         print(f"[sender] Interactive mode using SRCDIR={default_src_dir}")
         print("[sender] Type a filename relative to SRCDIR or an absolute path.")
@@ -29,7 +26,7 @@ async def interactive_loop(connection, default_src_dir: str | None = None) -> No
             print("[sender] Quitting interactive mode; connection will be closed.")
             break
 
-        # If SRCDIR is set and the user gave a relative path, resolve it
+
         if default_src_dir and not os.path.isabs(raw):
             file_path = os.path.join(default_src_dir, raw)
         else:
@@ -43,16 +40,19 @@ async def interactive_loop(connection, default_src_dir: str | None = None) -> No
 
 
 async def main() -> None:
-    # Load env variables from .env via your helper
-    env = load_env_vars()
 
-    # DEST_HOST is the remote receiver's IP; fallback to RECIVHOST for local receiver
+    env = load_env_vars()
     dest_host = env.get("dest_host") or env.get("recivhost") or "127.0.0.1"
-    port = env.get("port") or 4433
-    src_dir = env.get("src") or ""  # optional convenience
-    ca_cert = env.get("CA_CERT")
-    client_cert = env.get("CLIENT_CERT")
-    client_key = env.get("CLIENT_KEY")
+    port = env.get("port")
+    if isinstance(port, str):
+        port = int(port)
+    if not port:
+        port = 4433
+        
+    src_dir = env.get("src_dir") or ""  
+    ca_cert = env.get("ca_cert")
+    client_cert = env.get("certi")
+    client_key = env.get("key")
 
     if not dest_host or dest_host == "0.0.0.0":
         print("[sender] ERROR: DEST_HOST must be set in .env (or RECIVHOST cannot be 0.0.0.0)")
@@ -74,21 +74,21 @@ async def main() -> None:
     print(f"          SRCDIR={src_dir or '(none)'}")
     print(f"          CA_CERT={ca_cert}")
 
-    # Establish QUIC connection using the API
+
+
     connection = await quic_connect(
         host=dest_host,
         port=port,
-        insecure=False,  # Always verify
+        insecure=False, 
         client_cert=client_cert,
         client_key=client_key,
         ca_cert=ca_cert,
-        server_name=None,  # will default to host
+        server_name=None,  
     )
 
     print(f"[sender] Connected to {dest_host}:{port}")
 
     try:
-        # No initial CLI file list anymore; everything is via interactive input.
         await interactive_loop(connection, default_src_dir=src_dir)
     finally:
         await close_connection(connection)

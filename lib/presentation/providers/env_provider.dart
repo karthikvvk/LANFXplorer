@@ -1,3 +1,4 @@
+import 'package:files/data/services/env_writer.dart';
 import 'package:flutter/material.dart';
 import '../../data/models/app_env.dart';
 import '../../data/services/api_service.dart';
@@ -24,7 +25,7 @@ class EnvProvider extends ChangeNotifier {
     _env = _env!.copyWith(destHost: host);
     notifyListeners();
 
-    // Sync with backend
-    await _apiService.updateEnv('DEST_HOST', host);
+    await EnvWriter.setValue('DEST_HOST', host);
+    // final env = await EnvLoader.load();
   }
 }

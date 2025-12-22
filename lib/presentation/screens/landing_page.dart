@@ -1,6 +1,7 @@
 import 'package:files/data/models/machine.dart';
 import 'package:files/presentation/components/machine_card.dart';
 import 'package:files/presentation/components/theme_toggle_button.dart';
+import 'package:files/presentation/dialogs/connection_dialog.dart';
 import 'package:files/presentation/providers/env_provider.dart';
 import 'package:files/presentation/providers/network_provider.dart';
 import 'package:files/presentation/providers/session_provider.dart';
@@ -46,10 +47,23 @@ class _LandingPageState extends State<LandingPage> {
     context.read<NetworkProvider>().scanNetwork();
   }
 
-  void _onMachineSelected(Machine machine) {
-    context.read<EnvProvider>().updateDestHost(machine.ipAddress);
-    context.read<SessionProvider>().startSession(machine);
-    context.push('/main');
+  void _onMachineSelected(Machine machine) async {
+    // Show connection dialog for password authentication
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => ConnectionDialog(
+        machine: machine,
+        apiService: context.read<NetworkProvider>().apiService,
+      ),
+    );
+
+    // If handshake successful, proceed with session
+    if (result == true && mounted) {
+      context.read<EnvProvider>().updateDestHost(machine.ipAddress);
+      context.read<SessionProvider>().startSession(machine);
+      context.push('/main');
+    }
   }
 
   @override

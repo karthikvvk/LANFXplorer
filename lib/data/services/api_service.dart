@@ -63,22 +63,6 @@ class ApiService {
     }
   }
 
-  Future<bool> updateEnv(String key, String value) async {
-    try {
-      AppLogger.network('Updating env: $key=$value');
-      final response = await _client.post(
-        Uri.parse('${ApiEndpoints.baseUrl}/update_env'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({key: value}),
-      );
-
-      return response.statusCode == 200;
-    } catch (e) {
-      AppLogger.error('Failed to update env', error: e);
-      return false;
-    }
-  }
-
   Future<List<FileItem>> getFiles(String path, {String? remoteHost}) async {
     final Map<String, dynamic> body = {'path': path};
     if (remoteHost != null) {
@@ -115,7 +99,8 @@ class ApiService {
 
   Future<bool> sendFiles(String remoteHost, List<String> filePaths) async {
     try {
-      AppLogger.transfer('Sending ${filePaths.length} files to $remoteHost');
+      AppLogger.transfer(
+          'Sending ${'${ApiEndpoints.baseUrl}${ApiEndpoints.transferSend}'} files to $remoteHost');
       final response = await _client
           .post(
             Uri.parse('${ApiEndpoints.baseUrl}${ApiEndpoints.transferSend}'),
@@ -152,7 +137,65 @@ class ApiService {
     }
   }
 
+  Future<HandshakeResult> initiateHandshake({
+    required String destHost,
+    required String password,
+  }) async {
+    try {
+      AppLogger.network('Initiating handshake with $destHost');
+
+      final response = await _client
+          .post(
+            Uri.parse('${ApiEndpoints.baseUrl}/handshake'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'dest_host': destHost,
+              'password': password,
+            }),
+          )
+          .timeout(const Duration(seconds: 100));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return HandshakeResult.fromJson(data);
+      } else if (response.statusCode == 401) {
+        // Authentication failed
+        final data = jsonDecode(response.body);
+        return HandshakeResult(
+          success: false,
+          error: data['error'] ?? 'Invalid password',
+        );
+      } else {
+        return HandshakeResult(
+          success: false,
+          error: 'Connection failed (${response.statusCode})',
+        );
+      }
+    } catch (e, stack) {
+      AppLogger.error('Handshake error', error: e, stackTrace: stack);
+      return HandshakeResult(
+        success: false,
+        error: 'Connection error: ${e.toString()}',
+      );
+    }
+  }
+
   void dispose() {
     _client.close();
+  }
+}
+
+/// Result of handshake operation
+class HandshakeResult {
+  final bool success;
+  final String? error;
+
+  HandshakeResult({required this.success, this.error});
+
+  factory HandshakeResult.fromJson(Map<String, dynamic> json) {
+    return HandshakeResult(
+      success: json['success'] ?? false,
+      error: json['error'],
+    );
   }
 }

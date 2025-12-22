@@ -8,8 +8,8 @@ from scanner import *
 from flask_cors import CORS
 import platform
 import getpass
-import asyncio  # NEW
-from sender_api_functions import quic_connect, send_file, close_connection  # NEW
+import asyncio  
+from sender_api_functions import quic_connect, send_file, close_connection 
 from pki.store import PeerStore
 from pki.utils import fingerprint_pem, load_cert_pem
 
@@ -21,7 +21,6 @@ ENV_FILE = ".env"
 CORS(app, resources={r"/*": {"origins":"*"}})
 
 
-# ----------------- Peer Discovery Responder ----------------- #
 import threading
 
 class PeerDiscoveryResponder(threading.Thread):
@@ -88,34 +87,6 @@ def listhost():
 
     return jsonify(host_list)
 
-
-@app.route("/update_env", methods=["POST"])
-def update_env_endpoint():
-    """
-    Update environment variables (e.g. DEST_HOST).
-    JSON body: {"DEST_HOST": "1.2.3.4"}
-    """
-    try:
-        data = request.get_json(silent=True) or {}
-        if not data:
-            return jsonify({"status": "error", "message": "No data provided"}), 400
-
-        # Validate allowed keys to prevent arbitrary env injection if needed
-        # For now, we allow updating specific keys relevant to the app flow
-        allowed_keys = ["DEST_HOST", "RECIVHOST", "PORT"]
-        
-        updates = {}
-        for k, v in data.items():
-            if k in allowed_keys:
-                os.environ[k] = str(v)
-                updates[k] = str(v)
-                # optionally write to .env file if persistence is needed
-                set_key(ENV_FILE, k, str(v))
-        
-        print(f"[*] Updated environment: {updates}")
-        return jsonify({"status": "success", "updated": updates}), 200
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route("/osinfo", methods=["POST"])
@@ -258,115 +229,116 @@ def list_directory():
 
 
 @app.route("/send_files", methods=["POST"])
-def send_files():#ip=None):
-    """
-    Trigger a QUIC file send to a remote peer.
+def send_files():
+    try:
+        data = request.get_json() or {}
+        files = data.get("files", [])
+        remote_host = data.get("remote_host")
+        
+        if not isinstance(files, list) or not files:
+            return jsonify({"status": "error", "message": "files must be a non-empty list"}), 400
 
-    JSON body:
-    {
-      "remote_host": "192.168.0.100",   # optional, uses DEST_HOST/HOST if missing
-      "files": ["/abs/path/1", "/abs/path/2"]
-    }
-    """
-    # try:
-    data = request.get_json() or {}
-    files = data.get("files", [])
-    remote_host = data.get("remote_host")
-    # if ip:
-    #     remote_host = ip
-    if not isinstance(files, list) or not files:
-        return jsonify({"status": "error", "message": "files must be a non-empty list"}), 400
-
-    env = load_env_vars()
-    if not remote_host:
-        remote_host = env.get("dest_host") or env.get("recivhost") or env.get("host")
-
-    if not remote_host:
-        return jsonify({"status": "error", "message": "remote_host or DEST_HOST/HOST not set"}), 400
-
-    port = env.get("port") or 4433
-
-    # verify files exist
-    valid_files = []
-    missing = []
-    for f in files:
-        if os.path.isfile(f):
-            valid_files.append(f)
-        else:
-            missing.append(f)
-
-    if not valid_files:
-        return jsonify({"status": "error", "message": "no valid files to send", "missing": missing}), 400
-
-    async def _do_send():
-        # For now read client cert & key (optional) and ca (required)
         env = load_env_vars()
+        if not remote_host:
+            remote_host = env.get("dest_host") or env.get("recivhost") or env.get("host")
+
+        if not remote_host or remote_host == "0.0.0.0":
+            return jsonify({"status": "error", "message": "remote_host or DEST_HOST must be set to a valid remote IP"}), 400
+
+
+        port = env.get("port")
+        if isinstance(port, str):
+            port = int(port)
+        if not port:
+            port = 4433
+
+
+        valid_files = []
+        missing = []
+        for f in files:
+            if os.path.isfile(f):
+                valid_files.append(f)
+            else:
+                missing.append(f)
+
+        if not valid_files:
+            return jsonify({"status": "error", "message": "no valid files to send", "missing": missing}), 400
+
+
         client_cert = env.get("certi")
         client_key = env.get("key")
         ca_cert = env.get("ca_cert")
 
-        # SECURITY FIX: Enforce TLS verification
+
         if not ca_cert:
-            raise ValueError(
-                "CA_CERT environment variable not set. "
-                "Cannot verify server certificate. "
-                "Set CA_CERT to enable secure connections."
-            )
-
-        conn = await quic_connect(
-            host=remote_host,
-            port=port,
-            insecure=False,  # ALWAYS verify server certificate
-            server_name=os.environ.get("SERVER_NAME"),
-            client_cert=client_cert,
-            client_key=client_key,
-            ca_cert=ca_cert,
-        )
-        try:
-            for path in valid_files:
-                await send_file(conn, path)
-        finally:
-            await close_connection(conn)
-
-    asyncio.run(_do_send())
-
-    return jsonify({
-        "status": "success",
-        "remote_host": remote_host,
-        "port": port,
-        "sent": valid_files,
-        "missing": missing
-    }), 200
-
-    # except Exception as e:
-    #     return jsonify({"status": "error", "message": str(e)}), 500
+            return jsonify({
+                "status": "error",
+                "message": "CA_CERT environment variable not set. Cannot verify server certificate."
+            }), 500
+        
+        if not os.path.isfile(ca_cert):
+            return jsonify({
+                "status": "error",
+                "message": f"CA certificate file not found: {ca_cert}"
+            }), 500
 
 
-@app.route("/pki/info", methods=["GET"])
-def pki_info():
-    ca_path = os.environ.get("CA_CERT")
-    if ca_path and os.path.exists(ca_path):
-        pem = open(ca_path).read()
-        return {
-            "has_ca": True,
-            "fingerprint": fingerprint_pem(pem)
-        }, 200
-    return {"has_ca": False}, 200
+        if client_cert and not os.path.isfile(client_cert):
+            return jsonify({
+                "status": "error",
+                "message": f"Client certificate file not found: {client_cert}"
+            }), 500
+        
+        if client_key and not os.path.isfile(client_key):
+            return jsonify({
+                "status": "error",
+                "message": f"Client key file not found: {client_key}"
+            }), 500
+
+        async def _do_send():
+
+            conn = await quic_connect(host=remote_host, port=port, insecure=False, server_name=remote_host, 
+            client_cert=client_cert, client_key=client_key, ca_cert=ca_cert)
+            try:
+                
+                p2p_password = env.get("P2P_PASSWORD") or env.get("p2p_password")
+                if p2p_password:
+                    from sender_api_functions import send_auth
+                    print(f"[api_bridge] Authenticating with password...")
+                    auth_ok = await send_auth(conn, p2p_password)
+                    if not auth_ok:
+                        raise Exception("Authentication failed - wrong password or peer rejected")
+                    print(f"[api_bridge] ✓ Authentication successful")
+                else:
+                    print(f"[api_bridge] WARNING: No P2P_PASSWORD set, file transfer may fail")
+
+                # Now send files
+                for path in valid_files:
+                    await send_file(conn, path)
+            finally:
+                await close_connection(conn)
+
+        # Run the async send operation
+        asyncio.run(_do_send())
+
+        return jsonify({
+            "status": "success",
+            "remote_host": remote_host,
+            "port": port,
+            "sent": valid_files,
+            "missing": missing
+        }), 200
+
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"[!] send_files error: {error_details}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 
 
 @app.route("/receive_files", methods=["POST"])
 def receive_files():
-    """
-    Request files from a remote peer (pull operation).
-    This tells the REMOTE peer to send files to US.
-    
-    JSON body:
-    {
-      "remote_host": "192.168.0.100",  # The peer that HAS the files
-      "files": ["/remote/path/1"],      # File paths on REMOTE peer
-      "local_dest": "/local/path"       # Not used, but kept for clarity
-    }
-    """
     try:
         data = request.get_json() or {}
         remote_host = data.get("remote_host")
@@ -378,21 +350,17 @@ def receive_files():
         if not isinstance(files, list) or not files:
             return jsonify({"status": "error", "message": "files must be a non-empty list"}), 400
 
-        # Get OUR IP address (where files should be sent)
         env = load_env_vars()
         our_host = env.get("host")
         
         if not our_host:
             return jsonify({"status": "error", "message": "Cannot determine local host IP"}), 500
 
-        # Tell the REMOTE peer to send files to US
-        # This is the key insight: we call the remote's /send_files endpoint
-        # and pass OUR IP as the destination
         try:
             response = requests.post(
                 f"http://{remote_host}:5000/send_files",
                 json={
-                    "remote_host": our_host,  # Send to US
+                    "remote_host": our_host,  
                     "files": files            # Files on REMOTE system
                 },
                 timeout=60
@@ -430,6 +398,19 @@ def list_peers():
         return jsonify({"status": "success", "peers": peers}), 200
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/pki/info", methods=["GET"])
+def pki_info():
+    ca_path = os.environ.get("CA_CERT")
+    if ca_path and os.path.exists(ca_path):
+        pem = open(ca_path).read()
+        return {
+            "has_ca": True,
+            "fingerprint": fingerprint_pem(pem)
+        }, 200
+    return {"has_ca": False}, 200
+
 
 
 @app.route("/pki/ca", methods=["GET"])
@@ -484,7 +465,84 @@ def verify_peer_password():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@app.route('/handshake', methods=['POST'])
+def handshake():
+    """
+    Initiate handshake with a remote peer.
+    
+    JSON body:
+    {
+        "dest_host": "192.168.1.100",
+        "password": "secret_password"
+    }
+    
+    Returns:
+    {
+        "success": true/false,
+        "error": "error message if failed"
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        dest_host = data.get('dest_host')
+        password = data.get('password')
+        
+        if not dest_host:
+            return jsonify({'success': False, 'error': 'dest_host is required'}), 400
+        
+        if not password:
+            return jsonify({'success': False, 'error': 'password is required'}), 400
+        
+        # Get environment for certificate paths
+        env = load_env_vars()
+        client_cert = env.get('certi') or 'cert.pem'
+        ca_cert = env.get('ca_cert') or 'ca_cert.pem'
+        
+        # Check if certificates exist
+        if not os.path.isfile(client_cert):
+            return jsonify({
+                'success': False,
+                'error': f'Client certificate not found: {client_cert}'
+            }), 500
+        
+        if not os.path.isfile(ca_cert):
+            return jsonify({
+                'success': False,
+                'error': f'CA certificate not found: {ca_cert}'
+            }), 500
+        
+        # Perform handshake asynchronously
+        from pki.handshake import initiate_handshake
+        
+        async def _do_handshake():
+            return await initiate_handshake(
+                dest_host=dest_host,
+                password=password,
+                client_cert_path=client_cert,
+                ca_cert_path=ca_cert
+            )
+        
+        success = asyncio.run(_do_handshake())
+        
+        if success:
+            return jsonify({'success': True}), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Authentication failed. Check password or peer availability.'
+            }), 401
+        
+    except Exception as e:
+        print(f"[!] Handshake error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 
 if __name__ == "__main__":
-    start_peer_discovery()
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # start_peer_discovery()
+    app.run(
+        host="0.0.0.0",
+        port=5000,
+        debug=True,
+        use_reloader=False
+    )

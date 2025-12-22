@@ -2,20 +2,16 @@
 import asyncio
 import os
 import sys
-from elevate import elevate
+import getpass
 from startsetup import load_env_vars
 from receiver_api_functions import start_receiver, stop_receiver
-# elevate()
 
 def on_file_received(filepath: str, filesize: int) -> None:
-    """
-    Callback invoked for each fully received file.
-    """
+
     print(f"[receiver] Received file: {filepath} ({filesize} bytes)")
 
 
 async def main() -> None:
-    # Load env variables from .env via your helper
     env = load_env_vars()
 
     recivhost = env.get("recivhost") or "0.0.0.0"
@@ -24,8 +20,8 @@ async def main() -> None:
     key_path = env.get("key") or "key.pem"
     ca_cert = env.get("ca_cert") or env.get("CA_CERT")
     out_dir = env.get("out_dir") or os.getcwd()
+    user = env.get("user") or getpass.getuser()
 
-    # Basic checks
     if not os.path.isfile(cert_path):
         print(f"[receiver] ERROR: certificate file not found: {cert_path}")
         sys.exit(1)
@@ -44,39 +40,122 @@ async def main() -> None:
     print(f"          KEY={key_path}")
     print(f"          OUTDIR={out_dir}")
 
-    # Initialize CA Manager to handle CA duties if we are the CA
     from pki.ca_service import CAManager
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization
     
-    # We use current directory as cert directory, same as startsetup.py
-    # CAManager needs the actual IP to advertise itself, not 0.0.0.0
     ca_ip = env.get("host") or recivhost
     ca_mgr = CAManager(ca_ip, os.getcwd())
     
-    # Check if we are CA and start service if so
     if ca_mgr.check_ca_status():
         print(f"[receiver] CA keys found in {os.getcwd()}. Starting CA Service (Signing + Discovery)...")
         print(f"[receiver] CA will be advertised at {ca_ip}")
         await ca_mgr.start_ca_service()
     else:
         print("[receiver] No CA keys found locally. Running as standard peer.")
+        print("[receiver] Attempting CA discovery on network...")
+        
+        if not os.path.isfile(key_path):
+            print("[receiver] Generating private key...")
+            priv_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            with open(key_path, "wb") as f:
+                f.write(priv_key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.TraditionalOpenSSL,
+                    encryption_algorithm=serialization.NoEncryption()
+                ))
+        
+        with open(key_path, "rb") as f:
+            priv_key_pem = f.read()
+        
+        await ca_mgr.start_discovery()
+        print("[receiver] Broadcasting 'WHO_IS_CA'...")
+        
+        try:
+            await asyncio.wait_for(ca_mgr.ca_found_event.wait(), timeout=5.0)
+            print(f"[receiver] ✓ Found CA at {ca_mgr.ca_info}")
+            
+            print("[receiver] Requesting certificate signature from CA...")
+            client_cert, ca_cert_pem = await ca_mgr.get_signed_cert(priv_key_pem, f"{user}@{ca_ip}")
+            
+            with open(cert_path, "wb") as f:
+                f.write(client_cert)
+            with open(ca_cert or "ca_cert.pem", "wb") as f:
+                f.write(ca_cert_pem)
+            
+            if not ca_cert:
+                ca_cert = os.path.join(os.getcwd(), "ca_cert.pem")
+            
+            print("[receiver] ✓ Received signed certificate & CA cert from network CA")
+            ca_mgr.stop_discovery()
+            
+        except asyncio.TimeoutError:
+            print("[receiver] ✗ No CA found on network. Becoming Root CA...")
+            ca_cert_pem, ca_key_pem = await ca_mgr.become_ca()
+            
+            from pki.utils import sign_csr, generate_csr
+            csr = generate_csr(priv_key_pem, f"{user}@{ca_ip}", san_ips=[ca_ip])
+            client_cert = sign_csr(csr, ca_cert_pem, ca_key_pem)
+            
+            with open(cert_path, "wb") as f:
+                f.write(client_cert)
+            
+            if not ca_cert:
+                ca_cert = os.path.join(os.getcwd(), "ca_cert.pem")
+            
+            print("[receiver] ✓ Configured as network CA")
+            print(f"[receiver] CA will be advertised at {ca_ip}")
 
-    # Start the QUIC receiver using the API
+    from scanner import start_peer_discovery_listener
+    peer_listener = await start_peer_discovery_listener(ca_ip)
+    print(f"[receiver] Peer discovery active on UDP port 4436")
+
+    from pki.handshake import start_handshake_service
+    
+    if not ca_cert:
+        ca_cert = os.path.join(os.getcwd(), "ca_cert.pem")
+        print(f"[receiver] CA_CERT not in env, using default: {ca_cert}")
+    
+    if not os.path.isfile(ca_cert):
+        print(f"[receiver] ERROR: CA certificate not found: {ca_cert}")
+        print(f"[receiver] Please run 'python startsetup.py' first to initialize certificates")
+        sys.exit(1)
+    
+    receiver_password = os.getenv('RECEIVER_PASSWORD', 'default_temp_password')
+    if receiver_password == 'default_temp_password':
+        print(f"[receiver] WARNING: Using default password. Set RECEIVER_PASSWORD environment variable.")
+    else:
+        print(f"[receiver] Password authentication enabled with custom password")
+    
+    handshake_service = await start_handshake_service(
+        host=ca_ip,
+        receiver_password=receiver_password,
+        cert_path=cert_path,
+        ca_cert_path=ca_cert
+    )
+
     server = await start_receiver(
         host=recivhost,
         port=port,
         certificate=cert_path,
         private_key=key_path,
         ca_cert=ca_cert,
-        require_client_cert=True,
+        require_client_cert=False,  # aioquic can't reliably extract certs - use password auth
         on_file_received=on_file_received,
         save_dir=out_dir,
     )
 
-    print(f"[receiver] Listening on {recivhost}:{port}")
+    print(f"[receiver] QUIC Receiver listening on {recivhost}:{port}")
+    print(f"[receiver] All services running:")
+    print(f"           - Peer Discovery (UDP:4436)")
+    print(f"           - Handshake Service (TCP:4437)")
+    print(f"           - QUIC File Transfer (UDP:{port})")
+    if ca_mgr.check_ca_status():
+        print(f"           - CA Service (UDP:4434, TCP:4435)")
     print("[receiver] Press Ctrl+C to stop.")
 
     try:
-        await asyncio.Future()  # run forever
+        await asyncio.Future()  
     finally:
         await stop_receiver(server)
         print("[receiver] Server stopped.")

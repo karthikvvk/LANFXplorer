@@ -7,6 +7,7 @@ dump/
 *__pycache__/
 *.key
 .vscode/
+.agent/
 ./pkica_export/
 # Miscellaneous
 *.class
