@@ -12,6 +12,7 @@ Protocol runs on TCP port 4437 (HANDSHAKE_PORT).
 
 import asyncio
 import logging
+import os
 import socket
 from typing import Optional, Tuple
 
@@ -36,17 +37,17 @@ MSG_TRUSTED = b"TRUSTED"
 class HandshakeService:
     """Server-side handshake service running on receiver."""
     
-    def __init__(self, host: str, receiver_password: str, cert_path: str, ca_cert_path: str):
+    def __init__(self, host: str, cert_path: str, ca_cert_path: str):
         """
         Initialize handshake service.
         
         :param host: IP address to bind to
-        :param receiver_password: Password required for authentication
         :param cert_path: Path to this peer's certificate
         :param ca_cert_path: Path to CA certificate for verification
+        
+        Note: Password is read on-demand from os.environ.get("PASSWORD")
         """
         self.host = host
-        self.receiver_password = receiver_password
         self.cert_path = cert_path
         self.ca_cert_path = ca_cert_path
         self.server = None
@@ -95,8 +96,15 @@ class HandshakeService:
             password_bytes = await reader.readexactly(password_len)
             password = password_bytes.decode('utf-8')
             
-            # Step 4: Validate password
-            if password != self.receiver_password:
+            # Step 4: Validate password (read on-demand from environment)
+            expected_password = os.environ.get("PASSWORD")
+            if not expected_password:
+                logger.error(f"[Handshake] PASSWORD not set in environment")
+                writer.close()
+                await writer.wait_closed()
+                return
+            
+            if password != expected_password:
                 logger.warning(f"[Handshake] Invalid password from {peer_addr}")
                 # Send REJECTED
                 writer.write(len(MSG_REJECTED).to_bytes(4, 'big'))
@@ -309,15 +317,16 @@ async def initiate_handshake(
 
 async def start_handshake_service(
     host: str,
-    receiver_password: str,
     cert_path: str,
     ca_cert_path: str
 ) -> HandshakeService:
     """
     Convenience function to start handshake service.
     
+    Note: Password is read on-demand from os.environ.get("PASSWORD")
+    
     :return: HandshakeService instance
     """
-    service = HandshakeService(host, receiver_password, cert_path, ca_cert_path)
+    service = HandshakeService(host, cert_path, ca_cert_path)
     await service.start()
     return service

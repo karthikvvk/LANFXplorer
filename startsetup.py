@@ -222,9 +222,8 @@ def load_env_vars():
         "dest_host": dest_host,
         "recivhost": reciv_host,
         "ca_cert": ca_cert,
-        "P2P_PASSWORD": os.getenv("P2P_PASSWORD"),
-        "p2p_password": os.getenv("P2P_PASSWORD"),  # Also provide lowercase version
-        "RECEIVER_PASSWORD": os.getenv("RECEIVER_PASSWORD")
+        # NOTE: PASSWORD is intentionally NOT loaded here
+        # It should be read on-demand via os.environ.get("PASSWORD") where needed
     }
 
 def write_env():

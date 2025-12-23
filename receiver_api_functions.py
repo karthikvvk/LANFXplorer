@@ -105,7 +105,7 @@ async def _handle_stream(
 
             password = (await reader.readexactly(pass_len)).decode("utf-8")
             
-            env_pass = os.environ.get("P2P_PASSWORD")
+            env_pass = os.environ.get("PASSWORD")
             
             if not env_pass:
              

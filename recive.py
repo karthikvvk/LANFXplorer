@@ -121,15 +121,14 @@ async def main() -> None:
         print(f"[receiver] Please run 'python startsetup.py' first to initialize certificates")
         sys.exit(1)
     
-    receiver_password = os.getenv('RECEIVER_PASSWORD', 'default_temp_password')
-    if receiver_password == 'default_temp_password':
-        print(f"[receiver] WARNING: Using default password. Set RECEIVER_PASSWORD environment variable.")
+    # Password is read on-demand by handshake service via os.environ.get("PASSWORD")
+    if not os.environ.get('PASSWORD'):
+        print(f"[receiver] WARNING: PASSWORD not set in environment. Set PASSWORD environment variable.")
     else:
-        print(f"[receiver] Password authentication enabled with custom password")
+        print(f"[receiver] Password authentication enabled")
     
     handshake_service = await start_handshake_service(
         host=ca_ip,
-        receiver_password=receiver_password,
         cert_path=cert_path,
         ca_cert_path=ca_cert
     )
