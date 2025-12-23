@@ -22,10 +22,27 @@ CORS(app, resources={r"/*": {"origins":"*"}})
 
 # Transfer task registry for progress tracking
 import uuid
+import time
 from threading import Lock
+from wifi_speed import estimate_transfer_time_seconds, get_wifi_speed
 
-_transfer_tasks = {}  # task_id -> {status, progress, total_size, transferred, files, error}
+_transfer_tasks = {}  # task_id -> {status, progress, total_size, transferred, files, error, start_time, estimated_duration}
 _transfer_lock = Lock()
+
+# Cache WiFi speed (detect once at startup or first transfer)
+_wifi_speed_mbps = None
+
+def _get_cached_wifi_speed():
+    """Get cached WiFi speed or detect it."""
+    global _wifi_speed_mbps
+    if _wifi_speed_mbps is None:
+        _wifi_speed_mbps = get_wifi_speed()
+        if _wifi_speed_mbps:
+            print(f"[wifi_speed] Detected: {_wifi_speed_mbps} Mbps")
+        else:
+            print("[wifi_speed] Could not detect, using fallback 100 Mbps")
+            _wifi_speed_mbps = 100  # Fallback
+    return _wifi_speed_mbps
 
 
 def _create_transfer_task(files: list, remote_host: str, direction: str = "send") -> str:
@@ -35,6 +52,10 @@ def _create_transfer_task(files: list, remote_host: str, direction: str = "send"
     for f in files:
         if os.path.isfile(f):
             total_size += os.path.getsize(f)
+    
+    # Calculate estimated duration based on WiFi speed
+    wifi_speed = _get_cached_wifi_speed()
+    estimated_duration = estimate_transfer_time_seconds(total_size, wifi_speed)
     
     with _transfer_lock:
         _transfer_tasks[task_id] = {
@@ -47,18 +68,28 @@ def _create_transfer_task(files: list, remote_host: str, direction: str = "send"
             "direction": direction,
             "error": None,
             "current_file": files[0] if files else None,
+            "start_time": time.time(),
+            "estimated_duration": estimated_duration,
+            "wifi_speed_mbps": wifi_speed,
         }
+    print(f"[transfer] Task {task_id[:8]}... created: {total_size/(1024*1024):.1f}MB, ETA: {estimated_duration:.1f}s at {wifi_speed}Mbps")
     return task_id
 
 
 def _update_transfer_progress(task_id: str, bytes_sent: int, total_bytes: int):
-    """Update transfer progress (called from sender)."""
+    """Update transfer progress based on elapsed time (simulated realistic progress)."""
     with _transfer_lock:
         if task_id in _transfer_tasks:
             task = _transfer_tasks[task_id]
             task["transferred"] = bytes_sent
-            if total_bytes > 0:
-                task["progress"] = min(bytes_sent / total_bytes, 1.0)
+            
+            # Calculate progress based on elapsed time vs estimated duration
+            # This gives smoother, more realistic progress
+            if task["estimated_duration"] > 0:
+                elapsed = time.time() - task["start_time"]
+                task["progress"] = min(elapsed / task["estimated_duration"], 0.99)  # Cap at 99% until complete
+            elif total_bytes > 0:
+                task["progress"] = min(bytes_sent / total_bytes, 0.99)
 
 
 def _complete_transfer_task(task_id: str, success: bool, error: str = None):
@@ -69,6 +100,11 @@ def _complete_transfer_task(task_id: str, success: bool, error: str = None):
             task["status"] = "completed" if success else "failed"
             task["progress"] = 1.0 if success else task["progress"]
             task["error"] = error
+            
+            # Log actual vs estimated time
+            actual_duration = time.time() - task["start_time"]
+            print(f"[transfer] Task {task_id[:8]}... {'completed' if success else 'failed'}: "
+                  f"actual={actual_duration:.1f}s, estimated={task['estimated_duration']:.1f}s")
 
 
 import threading
@@ -390,6 +426,11 @@ def transfer_status(task_id):
         
         task = _transfer_tasks[task_id].copy()
     
+    # Recalculate progress based on elapsed time for in-progress tasks
+    if task["status"] == "in_progress" and task.get("estimated_duration", 0) > 0:
+        elapsed = time.time() - task["start_time"]
+        task["progress"] = min(elapsed / task["estimated_duration"], 0.99)
+    
     return jsonify({
         "status": task["status"],
         "progress": task["progress"],
@@ -398,6 +439,8 @@ def transfer_status(task_id):
         "files": task["files"],
         "current_file": task.get("current_file"),
         "error": task["error"],
+        "estimated_duration": task.get("estimated_duration", 0),
+        "elapsed": time.time() - task.get("start_time", time.time()),
     }), 200
 
 
