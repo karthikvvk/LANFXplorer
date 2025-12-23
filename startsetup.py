@@ -4,7 +4,7 @@ import os
 import platform
 import re, subprocess
 from dotenv import set_key, load_dotenv
-
+# from scanner import update_env
 
 pwd = os.getcwd()
 user = getpass.getuser()
@@ -90,7 +90,6 @@ def detect_interface():
         if not interface:
             raise Exception("[-] No Ethernet interface found")
 
-
 def get_network_info():
 
     global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
@@ -162,8 +161,6 @@ def get_network_info():
         "BROADCAST": broadcast
     }
 
-
-
 def load_env_vars():
 
     global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert 
@@ -230,13 +227,6 @@ def load_env_vars():
         "RECEIVER_PASSWORD": os.getenv("RECEIVER_PASSWORD")
     }
 
-
-def update_env():
-    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
-    
-
-
-
 def write_env():
     global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
     detect_interface()
@@ -277,7 +267,6 @@ def write_env():
 
 
     print(f"\n[+] Environment variables updated in {env_file}")
-
 
 def setup_pki_and_write_env():
     global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
