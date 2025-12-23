@@ -71,23 +71,36 @@ class TransferProvider extends ChangeNotifier {
         return false;
       }
 
-      // Poll for progress with timeout
+      // Poll for progress - first poll is immediate
       int pollAttempts = 0;
-      const maxPollAttempts = 600; // 5 minutes max (600 * 500ms)
+      const maxPollAttempts = 600; // 5 minutes max
+      int pollIntervalMs = 500; // Start with 500ms, adjust after first poll
 
       while (pollAttempts < maxPollAttempts) {
-        await Future.delayed(const Duration(milliseconds: 500));
+        // First poll is immediate (no delay), then use calculated interval
+        if (pollAttempts > 0) {
+          await Future.delayed(Duration(milliseconds: pollIntervalMs));
+        }
         pollAttempts++;
 
         final status = await _apiService.getTransferStatus(backendTaskId);
         if (status == null) {
-          // Polling failed, but transfer might still be running
-          // After 10 consecutive failures, give up
+          // Polling failed, wait and retry
           if (pollAttempts > 10) {
-            // Check if we've had 10 consecutive null responses
             AppLogger.warning('Polling failed, retrying...');
           }
+          await Future.delayed(const Duration(milliseconds: 500));
           continue;
+        }
+
+        // On first successful poll, adjust interval based on file size
+        // Larger files = slower progress = less frequent polls
+        if (pollAttempts == 1 && status.totalSize > 0) {
+          // Calculate poll interval: ~1 second per 10MB, min 500ms, max 2000ms
+          final sizeMb = status.totalSize / (1024 * 1024);
+          pollIntervalMs = (sizeMb * 100).clamp(500, 2000).toInt();
+          AppLogger.info(
+              'Poll interval set to ${pollIntervalMs}ms for ${sizeMb.toStringAsFixed(1)}MB file');
         }
 
         // Update local task with progress

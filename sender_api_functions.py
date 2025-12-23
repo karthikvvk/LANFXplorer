@@ -176,6 +176,9 @@ async def send_file_with_progress(
             if not chunk:
                 break
             writer.write(chunk)
+            # Drain after each chunk to actually send over network
+            # This ensures progress reflects bytes actually sent, not just buffered
+            await writer.drain()
             bytes_sent += len(chunk)
             
             # Call progress callback
@@ -185,7 +188,6 @@ async def send_file_with_progress(
                 except Exception:
                     pass  # Don't let callback errors break transfer
 
-    await writer.drain()
     writer.write_eof()
 
     try:
