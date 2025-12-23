@@ -1,4 +1,5 @@
 import 'package:files/presentation/screens/landing_page.dart';
+import 'package:files/presentation/screens/login_page.dart';
 import 'package:files/presentation/screens/main_page.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -18,8 +19,18 @@ import 'package:go_router/go_router.dart';
 /// 4. Use context.pop() to go back.
 class AppRouter {
   static final GoRouter router = GoRouter(
-    initialLocation: AppRoutes.home,
+    initialLocation: AppRoutes.login,
     routes: [
+      GoRoute(
+        path: AppRoutes.login,
+        name: 'login',
+        pageBuilder: (context, state) => CustomTransitionPage(
+          child: const LoginPage(),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+        ),
+      ),
       GoRoute(
         path: AppRoutes.home,
         name: 'home',
@@ -56,6 +67,7 @@ class AppRouter {
 /// Route path constants
 /// Use these instead of hard-coding route strings
 class AppRoutes {
-  static const String home = '/';
+  static const String login = '/';
+  static const String home = '/home';
   static const String main = '/main';
 }
