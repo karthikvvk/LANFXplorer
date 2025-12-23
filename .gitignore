@@ -20,6 +20,7 @@ dump/
 .build/
 .buildlog/
 .history
+archlinux-2025.09.01-x86_64.iso
 .svn/
 .swiftpm/
 migrate_working_dir/

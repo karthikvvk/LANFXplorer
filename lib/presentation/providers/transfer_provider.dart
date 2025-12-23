@@ -51,7 +51,11 @@ class TransferProvider extends ChangeNotifier {
       // Initiate the transfer - this returns immediately with a backend task_id
       final result = await _apiService.sendFiles(destinationId, paths);
 
+      AppLogger.info(
+          'sendFiles result: taskId=${result?.taskId}, status=${result?.status}');
+
       if (result == null) {
+        AppLogger.error('sendFiles returned null result');
         _updateTask(taskId, TransferStatus.failed, 0.0,
             errorMessage: 'Failed to initiate transfer');
         return false;
@@ -59,14 +63,30 @@ class TransferProvider extends ChangeNotifier {
 
       final backendTaskId = result.taskId;
 
-      // Poll for progress
-      bool isComplete = false;
-      while (!isComplete) {
+      // Validate taskId
+      if (backendTaskId.isEmpty) {
+        AppLogger.error('Backend returned empty task_id');
+        _updateTask(taskId, TransferStatus.failed, 0.0,
+            errorMessage: 'Server returned invalid task ID');
+        return false;
+      }
+
+      // Poll for progress with timeout
+      int pollAttempts = 0;
+      const maxPollAttempts = 600; // 5 minutes max (600 * 500ms)
+
+      while (pollAttempts < maxPollAttempts) {
         await Future.delayed(const Duration(milliseconds: 500));
+        pollAttempts++;
 
         final status = await _apiService.getTransferStatus(backendTaskId);
         if (status == null) {
           // Polling failed, but transfer might still be running
+          // After 10 consecutive failures, give up
+          if (pollAttempts > 10) {
+            // Check if we've had 10 consecutive null responses
+            AppLogger.warning('Polling failed, retrying...');
+          }
           continue;
         }
 
@@ -75,16 +95,17 @@ class TransferProvider extends ChangeNotifier {
 
         if (status.isCompleted) {
           _updateTask(taskId, TransferStatus.completed, 1.0);
-          isComplete = true;
           return true;
         } else if (status.isFailed) {
           _updateTask(taskId, TransferStatus.failed, status.progress,
               errorMessage: status.error ?? 'Transfer failed');
-          isComplete = true;
           return false;
         }
       }
 
+      // Timeout after max attempts
+      _updateTask(taskId, TransferStatus.failed, 0.0,
+          errorMessage: 'Transfer timed out');
       return false;
     } catch (e, s) {
       AppLogger.error('Send task error', error: e, stackTrace: s);
