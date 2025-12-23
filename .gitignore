@@ -22,7 +22,7 @@ dump/
 .svn/
 .swiftpm/
 migrate_working_dir/
-
+dump/
 # IntelliJ related
 *.iml
 *.ipr
