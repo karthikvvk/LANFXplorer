@@ -99,19 +99,24 @@ class ApiService {
 
   /// Initiates a file send and returns the task ID for progress tracking.
   /// Returns null if the request failed.
-  Future<SendResult?> sendFiles(
-      String remoteHost, List<String> filePaths) async {
+  /// [destDir] is the destination directory on the remote machine where files should be saved.
+  Future<SendResult?> sendFiles(String remoteHost, List<String> filePaths,
+      {String? destDir}) async {
     try {
       AppLogger.transfer(
-          'Sending ${ApiEndpoints.baseUrl}${ApiEndpoints.transferSend} files to $remoteHost');
+          'Sending ${ApiEndpoints.baseUrl}${ApiEndpoints.transferSend} files to $remoteHost at destDir=$destDir');
+      final Map<String, dynamic> body = {
+        'remote_host': remoteHost,
+        'files': filePaths,
+      };
+      if (destDir != null && destDir.isNotEmpty) {
+        body['dest_dir'] = destDir;
+      }
       final response = await _client
           .post(
             Uri.parse('${ApiEndpoints.baseUrl}${ApiEndpoints.transferSend}'),
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'remote_host': remoteHost,
-              'files': filePaths,
-            }),
+            body: jsonEncode(body),
           )
           .timeout(const Duration(seconds: 60));
 

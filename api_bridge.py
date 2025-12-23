@@ -320,6 +320,7 @@ def send_files():
     data = request.get_json() or {}
     files = data.get("files", [])
     remote_host = data.get("remote_host")
+    dest_dir = data.get("dest_dir")  # Destination directory on remote machine
     
     if not isinstance(files, list) or not files:
         return jsonify({"status": "error", "message": "files must be a non-empty list"}), 400
@@ -389,7 +390,7 @@ def send_files():
                             current_total = bytes_sent_total + bytes_sent_file
                             _update_transfer_progress(task_id, current_total, total_size)
                         
-                        await send_file_with_progress(conn, path, on_progress)
+                        await send_file_with_progress(conn, path, on_progress, dest_dir=dest_dir)
                         bytes_sent_total += file_size
                     
                     _complete_transfer_task(task_id, True)

@@ -129,7 +129,8 @@ async def send_file(connection: QuicSenderConnection, file_path: str) -> None:
 async def send_file_with_progress(
     connection: QuicSenderConnection, 
     file_path: str, 
-    on_progress: callable = None
+    on_progress: callable = None,
+    dest_dir: str = None
 ) -> None:
     """Send a file with progress callback support.
     
@@ -137,6 +138,7 @@ async def send_file_with_progress(
         connection: The QUIC connection to use
         file_path: Path to the file to send
         on_progress: Optional callback function that receives bytes_sent so far
+        dest_dir: Optional destination directory on the remote machine
     """
     abs_path = os.path.abspath(file_path)
 
@@ -155,6 +157,15 @@ async def send_file_with_progress(
         header_name = rel_path
 
     header_name = header_name.replace("\\", "/")
+    
+    # Prepend destination directory if provided
+    if dest_dir:
+        # Normalize the path and prepend to header
+        dest_dir = dest_dir.replace("\\", "/")
+        if not dest_dir.endswith("/"):
+            dest_dir += "/"
+        header_name = f"DEST:{dest_dir}|{header_name}"
+    
     try:
         if connection.client_cert_pem:
             fp = fingerprint_pem(connection.client_cert_pem)

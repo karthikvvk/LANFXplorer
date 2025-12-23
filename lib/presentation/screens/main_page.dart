@@ -56,8 +56,13 @@ class _MainPageState extends State<MainPage> {
       return;
     }
 
-    AppLogger.transfer('Sending ${selectedFiles.length} files to $destId');
-    final success = await transferProvider.sendFiles(destId, selectedFiles);
+    // Get the current remote directory path as the destination
+    final destDir = fileSystemProvider.remoteCurrentPath;
+
+    AppLogger.transfer(
+        'Sending ${selectedFiles.length} files to $destId at $destDir');
+    final success = await transferProvider.sendFiles(destId, selectedFiles,
+        destDir: destDir);
 
     if (success) {
       _showSnackBar('Successfully sent ${selectedFiles.length} file(s)');

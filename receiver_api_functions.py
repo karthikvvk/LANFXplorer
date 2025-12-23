@@ -73,12 +73,24 @@ async def _handle_stream(
         filename = filename_bytes.decode("utf-8")
         
         header_fp = None
+        dest_dir_override = None
         if filename.startswith("FP:") and "|" in filename:
             try:
                 marker, rest = filename.split("|", 1)
                 _, fp = marker.split(":", 1)
                 header_fp = fp.lower()
                 filename = rest
+            except Exception:
+                pass
+        
+        # Parse DEST: prefix for destination directory
+        if filename.startswith("DEST:") and "|" in filename:
+            try:
+                marker, rest = filename.split("|", 1)
+                _, dest_path = marker.split(":", 1)
+                dest_dir_override = dest_path.rstrip("/")
+                filename = rest
+                print(f"[receiver] Destination directory override: {dest_dir_override}")
             except Exception:
                 pass
 
@@ -175,8 +187,9 @@ async def _handle_stream(
             await writer.drain()
             return
 
-        base_dir = save_dir or os.getcwd()
-        if peer_fingerprint:
+        base_dir = dest_dir_override if dest_dir_override else (save_dir or os.getcwd())
+        if peer_fingerprint and not dest_dir_override:
+            # Only add fingerprint subdirectory if no explicit destination was provided
             base_dir = os.path.join(base_dir, peer_fingerprint)
         os.makedirs(base_dir, exist_ok=True)
         path = os.path.join(base_dir, filename)

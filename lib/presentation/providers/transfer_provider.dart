@@ -30,7 +30,8 @@ class TransferProvider extends ChangeNotifier {
   bool get hasActiveTasks => activeTasks.isNotEmpty;
 
   // ---------------- SEND ----------------
-  Future<bool> sendFiles(String destinationId, List<FileItem> files) async {
+  Future<bool> sendFiles(String destinationId, List<FileItem> files,
+      {String? destDir}) async {
     final taskId = _uuid.v4();
     final paths = files.map((f) => f.path).toList();
 
@@ -49,7 +50,8 @@ class TransferProvider extends ChangeNotifier {
 
     try {
       // Initiate the transfer - this returns immediately with a backend task_id
-      final result = await _apiService.sendFiles(destinationId, paths);
+      final result =
+          await _apiService.sendFiles(destinationId, paths, destDir: destDir);
 
       AppLogger.info(
           'sendFiles result: taskId=${result?.taskId}, status=${result?.status}');
