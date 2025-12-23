@@ -1,5 +1,5 @@
 class ApiEndpoints {
-  static const String baseUrl = 'http://10.51.136.182:5000';
+  static const String baseUrl = 'http://localhost:5000';
 
   static const String scan = '/listhost';
   static const String connect = '/health';

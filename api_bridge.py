@@ -228,12 +228,14 @@ def list_directory():
         }), 500
 
 
+
 @app.route("/send_files", methods=["POST"])
 def send_files():
     try:
         data = request.get_json() or {}
         files = data.get("files", [])
         remote_host = data.get("remote_host")
+        
         
         if not isinstance(files, list) or not files:
             return jsonify({"status": "error", "message": "files must be a non-empty list"}), 400
@@ -242,17 +244,12 @@ def send_files():
         if not remote_host:
             remote_host = env.get("dest_host") or env.get("recivhost") or env.get("host")
 
-        if not remote_host or remote_host == "0.0.0.0":
-            return jsonify({"status": "error", "message": "remote_host or DEST_HOST must be set to a valid remote IP"}), 400
+        if not remote_host:
+            return jsonify({"status": "error", "message": "remote_host or DEST_HOST/HOST not set"}), 400
 
+        port = env.get("port") or 4433
 
-        port = env.get("port")
-        if isinstance(port, str):
-            port = int(port)
-        if not port:
-            port = 4433
-
-
+        # verify files exist
         valid_files = []
         missing = []
         for f in files:
@@ -264,61 +261,36 @@ def send_files():
         if not valid_files:
             return jsonify({"status": "error", "message": "no valid files to send", "missing": missing}), 400
 
-
-        client_cert = env.get("certi")
-        client_key = env.get("key")
-        ca_cert = env.get("ca_cert")
-
-
-        if not ca_cert:
-            return jsonify({
-                "status": "error",
-                "message": "CA_CERT environment variable not set. Cannot verify server certificate."
-            }), 500
-        
-        if not os.path.isfile(ca_cert):
-            return jsonify({
-                "status": "error",
-                "message": f"CA certificate file not found: {ca_cert}"
-            }), 500
-
-
-        if client_cert and not os.path.isfile(client_cert):
-            return jsonify({
-                "status": "error",
-                "message": f"Client certificate file not found: {client_cert}"
-            }), 500
-        
-        if client_key and not os.path.isfile(client_key):
-            return jsonify({
-                "status": "error",
-                "message": f"Client key file not found: {client_key}"
-            }), 500
-
         async def _do_send():
+            # For now read client cert & key (optional) and ca (required)
+            env = load_env_vars()
+            client_cert = env.get("CLIENT_CERT")
+            client_key = env.get("CLIENT_KEY")
+            ca_cert = env.get("CA_CERT")
 
-            conn = await quic_connect(host=remote_host, port=port, insecure=False, server_name=remote_host, 
-            client_cert=client_cert, client_key=client_key, ca_cert=ca_cert)
+            # SECURITY FIX: Enforce TLS verification
+            if not ca_cert:
+                raise ValueError(
+                    "CA_CERT environment variable not set. "
+                    "Cannot verify server certificate. "
+                    "Set CA_CERT to enable secure connections."
+                )
+
+            conn = await quic_connect(
+                host=remote_host,
+                port=port,
+                insecure=False,  # ALWAYS verify server certificate
+                server_name=os.environ.get("SERVER_NAME"),
+                client_cert=client_cert,
+                client_key=client_key,
+                ca_cert=ca_cert,
+            )
             try:
-                
-                p2p_password = env.get("P2P_PASSWORD") or env.get("p2p_password")
-                if p2p_password:
-                    from sender_api_functions import send_auth
-                    print(f"[api_bridge] Authenticating with password...")
-                    auth_ok = await send_auth(conn, p2p_password)
-                    if not auth_ok:
-                        raise Exception("Authentication failed - wrong password or peer rejected")
-                    print(f"[api_bridge] ✓ Authentication successful")
-                else:
-                    print(f"[api_bridge] WARNING: No P2P_PASSWORD set, file transfer may fail")
-
-                # Now send files
                 for path in valid_files:
                     await send_file(conn, path)
             finally:
                 await close_connection(conn)
 
-        # Run the async send operation
         asyncio.run(_do_send())
 
         return jsonify({
@@ -330,9 +302,6 @@ def send_files():
         }), 200
 
     except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"[!] send_files error: {error_details}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
@@ -467,21 +436,6 @@ def verify_peer_password():
 
 @app.route('/handshake', methods=['POST'])
 def handshake():
-    """
-    Initiate handshake with a remote peer.
-    
-    JSON body:
-    {
-        "dest_host": "192.168.1.100",
-        "password": "secret_password"
-    }
-    
-    Returns:
-    {
-        "success": true/false,
-        "error": "error message if failed"
-    }
-    """
     try:
         data = request.get_json() or {}
         dest_host = data.get('dest_host')
@@ -539,10 +493,10 @@ def handshake():
 
 
 if __name__ == "__main__":
-    # start_peer_discovery()
+    start_peer_discovery()
     app.run(
         host="0.0.0.0",
         port=5000,
         debug=True,
-        use_reloader=False
+        # use_reloader=False
     )
