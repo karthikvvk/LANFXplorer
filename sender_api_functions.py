@@ -126,6 +126,81 @@ async def send_file(connection: QuicSenderConnection, file_path: str) -> None:
         print(f"[sender] Error reading ACK: {e}")
 
 
+async def send_file_with_progress(
+    connection: QuicSenderConnection, 
+    file_path: str, 
+    on_progress: callable = None
+) -> None:
+    """Send a file with progress callback support.
+    
+    Args:
+        connection: The QUIC connection to use
+        file_path: Path to the file to send
+        on_progress: Optional callback function that receives bytes_sent so far
+    """
+    abs_path = os.path.abspath(file_path)
+
+    if not os.path.isfile(abs_path):
+        return
+
+    try:
+        cwd = os.getcwd()
+        rel_path = os.path.relpath(abs_path, cwd)
+    except Exception:
+        rel_path = os.path.basename(abs_path)
+
+    if rel_path.startswith(".."):
+        header_name = os.path.basename(abs_path)
+    else:
+        header_name = rel_path
+
+    header_name = header_name.replace("\\", "/")
+    try:
+        if connection.client_cert_pem:
+            fp = fingerprint_pem(connection.client_cert_pem)
+            header_name = f"FP:{fp}|{header_name}"
+    except Exception:
+        pass
+
+    filesize = os.path.getsize(abs_path)
+    header = _build_header(header_name, filesize)
+
+    reader, writer = await connection.protocol.create_stream()
+
+    writer.write(header)
+    bytes_sent = 0
+    
+    with open(abs_path, "rb") as f:
+        while True:
+            chunk = f.read(65536)
+            if not chunk:
+                break
+            writer.write(chunk)
+            bytes_sent += len(chunk)
+            
+            # Call progress callback
+            if on_progress:
+                try:
+                    on_progress(bytes_sent)
+                except Exception:
+                    pass  # Don't let callback errors break transfer
+
+    await writer.drain()
+    writer.write_eof()
+
+    try:
+        ack = await reader.read(1024)
+        if hasattr(ack, "decode"): 
+             if ack.startswith(b"REJECTED"):
+                 print(f"[sender] [ERROR] File transfer REJECTED by receiver: {ack}")
+             elif ack.startswith(b"OK"):
+                 pass # Success
+             else:
+                 print(f"[sender] File transfer response: {ack}")
+    except Exception as e:
+        print(f"[sender] Error reading ACK: {e}")
+
+
 
 async def send_bytes(connection: QuicSenderConnection, data: bytes, filename_hint: str = "data.bin",) -> None:
     

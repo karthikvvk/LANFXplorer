@@ -16,6 +16,7 @@ dump/
 *.swp
 .DS_Store
 .atom/
+*.peers_key
 .build/
 .buildlog/
 .history

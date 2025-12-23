@@ -48,16 +48,44 @@ class TransferProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final ok = await _apiService.sendFiles(destinationId, paths);
+      // Initiate the transfer - this returns immediately with a backend task_id
+      final result = await _apiService.sendFiles(destinationId, paths);
 
-      _updateTask(
-        taskId,
-        ok ? TransferStatus.completed : TransferStatus.failed,
-        ok ? 1.0 : 0.0,
-        errorMessage: ok ? null : 'Failed to send files',
-      );
+      if (result == null) {
+        _updateTask(taskId, TransferStatus.failed, 0.0,
+            errorMessage: 'Failed to initiate transfer');
+        return false;
+      }
 
-      return ok;
+      final backendTaskId = result.taskId;
+
+      // Poll for progress
+      bool isComplete = false;
+      while (!isComplete) {
+        await Future.delayed(const Duration(milliseconds: 500));
+
+        final status = await _apiService.getTransferStatus(backendTaskId);
+        if (status == null) {
+          // Polling failed, but transfer might still be running
+          continue;
+        }
+
+        // Update local task with progress
+        _updateTask(taskId, TransferStatus.inProgress, status.progress);
+
+        if (status.isCompleted) {
+          _updateTask(taskId, TransferStatus.completed, 1.0);
+          isComplete = true;
+          return true;
+        } else if (status.isFailed) {
+          _updateTask(taskId, TransferStatus.failed, status.progress,
+              errorMessage: status.error ?? 'Transfer failed');
+          isComplete = true;
+          return false;
+        }
+      }
+
+      return false;
     } catch (e, s) {
       AppLogger.error('Send task error', error: e, stackTrace: s);
       _updateTask(taskId, TransferStatus.failed, 0.0,

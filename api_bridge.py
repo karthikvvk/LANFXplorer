@@ -20,6 +20,56 @@ CHUNK_SIZE = 64 * 1024
 ENV_FILE = ".env"
 CORS(app, resources={r"/*": {"origins":"*"}})
 
+# Transfer task registry for progress tracking
+import uuid
+from threading import Lock
+
+_transfer_tasks = {}  # task_id -> {status, progress, total_size, transferred, files, error}
+_transfer_lock = Lock()
+
+
+def _create_transfer_task(files: list, remote_host: str, direction: str = "send") -> str:
+    """Create a new transfer task and return its ID."""
+    task_id = str(uuid.uuid4())
+    total_size = 0
+    for f in files:
+        if os.path.isfile(f):
+            total_size += os.path.getsize(f)
+    
+    with _transfer_lock:
+        _transfer_tasks[task_id] = {
+            "status": "in_progress",
+            "progress": 0.0,
+            "total_size": total_size,
+            "transferred": 0,
+            "files": files,
+            "remote_host": remote_host,
+            "direction": direction,
+            "error": None,
+            "current_file": files[0] if files else None,
+        }
+    return task_id
+
+
+def _update_transfer_progress(task_id: str, bytes_sent: int, total_bytes: int):
+    """Update transfer progress (called from sender)."""
+    with _transfer_lock:
+        if task_id in _transfer_tasks:
+            task = _transfer_tasks[task_id]
+            task["transferred"] = bytes_sent
+            if total_bytes > 0:
+                task["progress"] = min(bytes_sent / total_bytes, 1.0)
+
+
+def _complete_transfer_task(task_id: str, success: bool, error: str = None):
+    """Mark a transfer task as completed or failed."""
+    with _transfer_lock:
+        if task_id in _transfer_tasks:
+            task = _transfer_tasks[task_id]
+            task["status"] = "completed" if success else "failed"
+            task["progress"] = 1.0 if success else task["progress"]
+            task["error"] = error
+
 
 import threading
 
@@ -231,11 +281,9 @@ def list_directory():
 
 @app.route("/send_files", methods=["POST"])
 def send_files():
-    # try:
     data = request.get_json() or {}
     files = data.get("files", [])
     remote_host = data.get("remote_host")
-    
     
     if not isinstance(files, list) or not files:
         return jsonify({"status": "error", "message": "files must be a non-empty list"}), 400
@@ -261,48 +309,96 @@ def send_files():
     if not valid_files:
         return jsonify({"status": "error", "message": "no valid files to send", "missing": missing}), 400
 
-    async def _do_send():
-        # For now read client cert & key (optional) and ca (required)
-        # env = load_env_vars()
-        client_cert = env.get("CLIENT_CERT")
-        client_key = env.get("CLIENT_KEY")
-        ca_cert = env.get("CA_CERT") or env.get("ca_cert")
-
-        # SECURITY FIX: Enforce TLS verification
-        if not ca_cert:
-            raise ValueError(
-                "CA_CERT environment variable not set. "
-                "Cannot verify server certificate. "
-                "Set CA_CERT to enable secure connections."
-            )
-
-        conn = await quic_connect(
-            host=remote_host,
-            port=port,
-            insecure=False,  # ALWAYS verify server certificate
-            server_name=os.environ.get("SERVER_NAME"),
-            client_cert=client_cert,
-            client_key=client_key,
-            ca_cert=ca_cert,
-        )
+    # Create task for tracking
+    task_id = _create_transfer_task(valid_files, remote_host, "send")
+    
+    def _do_send_background():
+        """Background thread to perform the actual transfer."""
         try:
-            for path in valid_files:
-                await send_file(conn, path)
-        finally:
-            await close_connection(conn)
+            client_cert = env.get("CLIENT_CERT")
+            client_key = env.get("CLIENT_KEY")
+            ca_cert = env.get("CA_CERT") or env.get("ca_cert")
 
-    asyncio.run(_do_send())#set_debug(True)
+            if not ca_cert:
+                _complete_transfer_task(task_id, False, "CA_CERT not set")
+                return
 
+            async def _async_send():
+                from sender_api_functions import send_file_with_progress
+                
+                conn = await quic_connect(
+                    host=remote_host,
+                    port=port,
+                    insecure=False,
+                    server_name=os.environ.get("SERVER_NAME"),
+                    client_cert=client_cert,
+                    client_key=client_key,
+                    ca_cert=ca_cert,
+                )
+                try:
+                    # Calculate total size for all files
+                    total_size = sum(os.path.getsize(f) for f in valid_files)
+                    bytes_sent_total = 0
+                    
+                    for path in valid_files:
+                        # Update current file in task
+                        with _transfer_lock:
+                            if task_id in _transfer_tasks:
+                                _transfer_tasks[task_id]["current_file"] = path
+                        
+                        file_size = os.path.getsize(path)
+                        
+                        def on_progress(bytes_sent_file):
+                            nonlocal bytes_sent_total
+                            current_total = bytes_sent_total + bytes_sent_file
+                            _update_transfer_progress(task_id, current_total, total_size)
+                        
+                        await send_file_with_progress(conn, path, on_progress)
+                        bytes_sent_total += file_size
+                    
+                    _complete_transfer_task(task_id, True)
+                finally:
+                    await close_connection(conn)
+
+            asyncio.run(_async_send())
+            
+        except Exception as e:
+            print(f"[send_files] Transfer error: {e}")
+            _complete_transfer_task(task_id, False, str(e))
+
+    # Start transfer in background thread
+    thread = threading.Thread(target=_do_send_background, daemon=True)
+    thread.start()
+
+    # Return immediately with task_id for polling
     return jsonify({
-        "status": "success",
+        "status": "in_progress",
+        "task_id": task_id,
         "remote_host": remote_host,
         "port": port,
-        "sent": valid_files,
+        "files": valid_files,
         "missing": missing
-    }), 200
+    }), 202  # 202 Accepted
 
-    # except Exception as e:
-    #     return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/transfer_status/<task_id>", methods=["GET"])
+def transfer_status(task_id):
+    """Get the status of a transfer task."""
+    with _transfer_lock:
+        if task_id not in _transfer_tasks:
+            return jsonify({"status": "error", "message": "Task not found"}), 404
+        
+        task = _transfer_tasks[task_id].copy()
+    
+    return jsonify({
+        "status": task["status"],
+        "progress": task["progress"],
+        "total_size": task["total_size"],
+        "transferred": task["transferred"],
+        "files": task["files"],
+        "current_file": task.get("current_file"),
+        "error": task["error"],
+    }), 200
 
 
 

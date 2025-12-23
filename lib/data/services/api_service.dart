@@ -97,10 +97,13 @@ class ApiService {
         .toList();
   }
 
-  Future<bool> sendFiles(String remoteHost, List<String> filePaths) async {
+  /// Initiates a file send and returns the task ID for progress tracking.
+  /// Returns null if the request failed.
+  Future<SendResult?> sendFiles(
+      String remoteHost, List<String> filePaths) async {
     try {
       AppLogger.transfer(
-          'Sending ${'${ApiEndpoints.baseUrl}${ApiEndpoints.transferSend}'} files to $remoteHost');
+          'Sending ${ApiEndpoints.baseUrl}${ApiEndpoints.transferSend} files to $remoteHost');
       final response = await _client
           .post(
             Uri.parse('${ApiEndpoints.baseUrl}${ApiEndpoints.transferSend}'),
@@ -110,25 +113,53 @@ class ApiService {
               'files': filePaths,
             }),
           )
-          .timeout(const Duration(seconds: 30));
+          .timeout(const Duration(seconds: 60));
 
-      return response.statusCode == 200;
+      if (response.statusCode == 202 || response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return SendResult(
+          taskId: data['task_id'] ?? '',
+          status: data['status'] ?? 'unknown',
+          files: List<String>.from(data['files'] ?? filePaths),
+        );
+      }
+      AppLogger.error('Send files failed: ${response.statusCode}');
+      return null;
     } catch (e, stack) {
       AppLogger.error('Send files error', error: e, stackTrace: stack);
-      return false;
+      return null;
+    }
+  }
+
+  /// Poll the status of a transfer task.
+  Future<TransferStatusResult?> getTransferStatus(String taskId) async {
+    try {
+      final response = await _client.get(
+        Uri.parse('${ApiEndpoints.baseUrl}/transfer_status/$taskId'),
+        headers: {'Accept': 'application/json'},
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return TransferStatusResult.fromJson(data);
+      }
+      return null;
+    } catch (e) {
+      AppLogger.error('Get transfer status error: $e');
+      return null;
     }
   }
 
   Future<bool> fetchFiles(String remoteHost, List<String> filePaths) async {
     try {
-      AppLogger.transfer('Fetching ${filePaths} files from $remoteHost');
+      AppLogger.transfer('Fetching $filePaths files from $remoteHost');
       final response = await _client
           .post(
             Uri.parse('${ApiEndpoints.baseUrl}${ApiEndpoints.transferFetch}'),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({'remote_host': remoteHost, 'files': filePaths}),
           )
-          .timeout(const Duration(seconds: 30));
+          .timeout(const Duration(seconds: 60));
 
       return response.statusCode == 200;
     } catch (e, stack) {
@@ -198,4 +229,54 @@ class HandshakeResult {
       error: json['error'],
     );
   }
+}
+
+/// Result of initiating a file send operation
+class SendResult {
+  final String taskId;
+  final String status;
+  final List<String> files;
+
+  SendResult({
+    required this.taskId,
+    required this.status,
+    required this.files,
+  });
+}
+
+/// Result of polling transfer status
+class TransferStatusResult {
+  final String status; // 'in_progress', 'completed', 'failed'
+  final double progress; // 0.0 to 1.0
+  final int totalSize;
+  final int transferred;
+  final List<String> files;
+  final String? currentFile;
+  final String? error;
+
+  TransferStatusResult({
+    required this.status,
+    required this.progress,
+    required this.totalSize,
+    required this.transferred,
+    required this.files,
+    this.currentFile,
+    this.error,
+  });
+
+  factory TransferStatusResult.fromJson(Map<String, dynamic> json) {
+    return TransferStatusResult(
+      status: json['status'] ?? 'unknown',
+      progress: (json['progress'] ?? 0).toDouble(),
+      totalSize: json['total_size'] ?? 0,
+      transferred: json['transferred'] ?? 0,
+      files: List<String>.from(json['files'] ?? []),
+      currentFile: json['current_file'],
+      error: json['error'],
+    );
+  }
+
+  bool get isCompleted => status == 'completed';
+  bool get isFailed => status == 'failed';
+  bool get isInProgress => status == 'in_progress';
 }
