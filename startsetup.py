@@ -23,10 +23,10 @@ key = os.path.join(pwd, "key.pem")
 certi = os.path.join(pwd, "cert.pem")
 dest_host = ""
 reciv_host = "0.0.0.0"
-
+ca_cert = os.path.join(pwd, "ca_cert.pem")
 
 def detect_interface():
-    global host_ip, cidr, interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host
+    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
 
     if sys.startswith("linux"):
 
@@ -93,7 +93,7 @@ def detect_interface():
 
 def get_network_info():
 
-    global host_ip, cidr, interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host
+    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
 
 
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -166,7 +166,7 @@ def get_network_info():
 
 def load_env_vars():
 
-    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host
+    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert 
     
     load_dotenv()
     
@@ -187,7 +187,7 @@ def load_env_vars():
     key = os.getenv("KEY", "")
     dest_host = os.getenv("DEST_HOST", "")
     reciv_host = os.getenv("RECIVHOST", "0.0.0.0")
-    ca_cert = os.getenv("CA_CERT", os.path.join(pwd, "ca_cert.pem"))
+    ca_cert = os.getenv("CA_CERT")#, os.path.join(pwd, "ca_cert.pem"))
     
     print(f"[+] Loaded environment variables from .env")
     # print({
@@ -232,13 +232,13 @@ def load_env_vars():
 
 
 def update_env():
-    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host
+    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
     
 
 
 
 def write_env():
-    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host
+    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
     detect_interface()
     ls = os.listdir(pwd)
     if "key.pem" not in ls or "cert.pem" not in ls:
@@ -280,7 +280,7 @@ def write_env():
 
 
 def setup_pki_and_write_env():
-
+    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
     import asyncio
     from pki.ca_service import CAManager
     from cryptography.hazmat.primitives import serialization
