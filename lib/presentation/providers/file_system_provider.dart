@@ -10,8 +10,8 @@ class FileSystemProvider extends ChangeNotifier {
   FileSystemProvider({ApiService? apiService}) : _apiService = apiService;
   List<FileItem> _localFiles = [];
   List<FileItem> _remoteFiles = [];
-  String _localCurrentPath = '/';
-  String _remoteCurrentPath = '/';
+  String _localCurrentPath = '.'; // Will be converted to absolute on first load
+  String _remoteCurrentPath = '.'; // Will be set properly on first load
   String? _remoteHost;
   bool _isLoadingLocal = false;
   bool _isLoadingRemote = false;
@@ -33,7 +33,14 @@ class FileSystemProvider extends ChangeNotifier {
     notifyListeners();
 
     if (path != null) {
-      _localCurrentPath = path;
+      // Ensure path is absolute
+      if (path == '.' || path == './') {
+        _localCurrentPath = Directory.current.path;
+      } else if (!path.startsWith('/')) {
+        _localCurrentPath = Directory(path).absolute.path;
+      } else {
+        _localCurrentPath = path;
+      }
     }
 
     try {
@@ -63,7 +70,10 @@ class FileSystemProvider extends ChangeNotifier {
     _isLoadingRemote = true;
     notifyListeners();
 
-    if (path != null) _remoteCurrentPath = path;
+    if (path != null) {
+      // For remote, we use '.' as-is since the remote will resolve it
+      _remoteCurrentPath = path;
+    }
     if (host != null) _remoteHost = host;
 
     try {
@@ -72,6 +82,14 @@ class FileSystemProvider extends ChangeNotifier {
           _remoteCurrentPath,
           remoteHost: _remoteHost,
         );
+        // Update path from the first file's parent if available (to get absolute path)
+        if (_remoteFiles.isNotEmpty && _remoteCurrentPath == '.') {
+          final firstPath = _remoteFiles.first.path;
+          final parentDir = firstPath.substring(0, firstPath.lastIndexOf('/'));
+          if (parentDir.isNotEmpty) {
+            _remoteCurrentPath = parentDir;
+          }
+        }
       }
     } catch (e, stack) {
       AppLogger.error('Failed to load remote files',

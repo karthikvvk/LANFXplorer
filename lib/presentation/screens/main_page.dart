@@ -88,8 +88,13 @@ class _MainPageState extends State<MainPage> {
       return;
     }
 
-    AppLogger.transfer('Fetching ${selectedFiles.length} files from $sourceId');
-    final success = await transferProvider.fetchFiles(sourceId, selectedFiles);
+    // Get the local current directory as the destination
+    final destDir = fileSystemProvider.localCurrentPath;
+
+    AppLogger.transfer(
+        'Fetching ${selectedFiles.length} files from $sourceId to $destDir');
+    final success = await transferProvider.fetchFiles(sourceId, selectedFiles,
+        destDir: destDir);
 
     if (success) {
       _showSnackBar('Successfully fetched ${selectedFiles.length} file(s)');

@@ -452,6 +452,7 @@ def receive_files():
     data = request.get_json() or {}
     remote_host = data.get("remote_host")
     files = data.get("files", [])
+    dest_dir = data.get("dest_dir")  # Local directory where files should be saved
     
     if not remote_host:
         return jsonify({"status": "error", "message": "remote_host is required"}), 400
@@ -466,16 +467,22 @@ def receive_files():
         return jsonify({"status": "error", "message": "Cannot determine local host IP"}), 500
 
     try:
+        payload = {
+            "remote_host": our_host,  
+            "files": files            # Files on REMOTE system
+        }
+        # Pass destination directory if provided
+        if dest_dir:
+            payload["dest_dir"] = dest_dir
+        
         response = requests.post(
             f"http://{remote_host}:5000/send_files",
-            json={
-                "remote_host": our_host,  
-                "files": files            # Files on REMOTE system
-            },
+            json=payload,
             timeout=60
         )
         
-        if response.status_code == 200:
+        # Accept both 200 and 202 (async) responses as success
+        if response.status_code in (200, 202):
             result = response.json()
             return jsonify({
                 "status": "success",

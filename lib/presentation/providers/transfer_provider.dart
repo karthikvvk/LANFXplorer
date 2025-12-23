@@ -131,7 +131,8 @@ class TransferProvider extends ChangeNotifier {
   }
 
   // ---------------- RECEIVE ----------------
-  Future<bool> fetchFiles(String sourceId, List<FileItem> files) async {
+  Future<bool> fetchFiles(String sourceId, List<FileItem> files,
+      {String? destDir}) async {
     final taskId = _uuid.v4();
     final paths = files.map((f) => f.path).toList();
 
@@ -149,7 +150,8 @@ class TransferProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final ok = await _apiService.fetchFiles(sourceId, paths);
+      final ok =
+          await _apiService.fetchFiles(sourceId, paths, destDir: destDir);
 
       _updateTask(
         taskId,

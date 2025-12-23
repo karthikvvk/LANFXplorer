@@ -155,14 +155,23 @@ class ApiService {
     }
   }
 
-  Future<bool> fetchFiles(String remoteHost, List<String> filePaths) async {
+  Future<bool> fetchFiles(String remoteHost, List<String> filePaths,
+      {String? destDir}) async {
     try {
-      AppLogger.transfer('Fetching $filePaths files from $remoteHost');
+      AppLogger.transfer(
+          'Fetching $filePaths files from $remoteHost to destDir=$destDir');
+      final Map<String, dynamic> body = {
+        'remote_host': remoteHost,
+        'files': filePaths,
+      };
+      if (destDir != null && destDir.isNotEmpty) {
+        body['dest_dir'] = destDir;
+      }
       final response = await _client
           .post(
             Uri.parse('${ApiEndpoints.baseUrl}${ApiEndpoints.transferFetch}'),
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'remote_host': remoteHost, 'files': filePaths}),
+            body: jsonEncode(body),
           )
           .timeout(const Duration(seconds: 60));
 
