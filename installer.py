@@ -1,0 +1,861 @@
+#!/usr/bin/env python3
+"""
+LANFXplorer Installer
+
+Cross-platform installer that handles:
+1. System dependency checks (OpenSSL, Python)
+2. Firewall configuration for all required ports
+3. Python requirements installation
+4. Directory structure setup
+5. Desktop entry creation (Linux/Windows)
+6. Application startup orchestration
+"""
+
+import os
+import sys
+import platform
+import subprocess
+import shutil
+import getpass
+import argparse
+import time
+from pathlib import Path
+
+# Application directory
+APP_DIR = Path(__file__).parent.resolve()
+SYSTEM = platform.system().lower()
+
+# Ports used by the application
+PORTS = {
+    4433: ("UDP", "QUIC File Transfer"),
+    4434: ("UDP", "CA Discovery"),
+    4435: ("TCP", "CA Signing Service"),
+    4436: ("UDP", "Peer Discovery"),
+    4437: ("TCP", "Handshake Service"),
+    5000: ("TCP", "API Bridge (Flask)"),
+}
+
+
+def print_header(text: str):
+    """Print a formatted header."""
+    print(f"\n{'='*60}")
+    print(f"  {text}")
+    print(f"{'='*60}")
+
+
+def print_status(status: str, message: str, indent: int = 0):
+    """Print a status message."""
+    prefix = "  " * indent
+    symbols = {"ok": "✓", "fail": "✗", "info": "ℹ", "warn": "⚠", "run": "→"}
+    symbol = symbols.get(status, "•")
+    print(f"{prefix}[{symbol}] {message}")
+
+
+def run_command(cmd: list, capture: bool = True, check: bool = False, timeout: int = 120) -> tuple:
+    """Run a command and return (success, stdout, stderr)."""
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=capture,
+            text=True,
+            timeout=timeout,
+            check=check
+        )
+        return True, result.stdout, result.stderr
+    except subprocess.CalledProcessError as e:
+        return False, e.stdout or "", e.stderr or str(e)
+    except subprocess.TimeoutExpired:
+        return False, "", "Command timed out"
+    except FileNotFoundError:
+        return False, "", f"Command not found: {cmd[0]}"
+    except Exception as e:
+        return False, "", str(e)
+
+
+def elevate_if_needed():
+    """Elevate to admin/root if not already elevated."""
+    if SYSTEM.startswith("win"):
+        import ctypes
+        if not ctypes.windll.shell32.IsUserAnAdmin():
+            try:
+                import elevate
+                elevate.elevate()
+            except ImportError:
+                print_status("warn", "elevate module not available. Run as Administrator manually.")
+                return False
+    else:
+        if os.geteuid() != 0:
+            try:
+                import elevate
+                elevate.elevate()
+            except ImportError:
+                print_status("warn", "elevate module not available. Run with sudo manually.")
+                return False
+    return True
+
+
+def drop_privileges():
+    """
+    Drop back to normal user privileges after elevated operations.
+    On Linux, this resets effective UID/GID to real UID/GID.
+    On Windows, this is a no-op (Windows handles this differently).
+    """
+    print("droping prev")
+    if SYSTEM.startswith("linux"):
+        try:
+            # Get the original user's UID/GID
+            sudo_uid = os.environ.get('SUDO_UID')
+            sudo_gid = os.environ.get('SUDO_GID')
+            
+            if sudo_uid and sudo_gid:
+                # We were elevated via sudo, drop back
+                os.setegid(int(sudo_gid))
+                os.seteuid(int(sudo_uid))
+                print_status("ok", "Dropped to normal user privileges")
+            elif os.geteuid() == 0:
+                # Running as root but not via sudo - just continue
+                print_status("info", "Running as root, continuing...")
+            # else: already running as normal user, nothing to do
+        except PermissionError:
+            # Can't drop privileges - likely not elevated
+            pass
+        except Exception as e:
+            print_status("warn", f"Could not drop privileges: {e}")
+    # Windows: no-op, subprocess calls with "runas" don't persist elevation
+    return True
+
+
+# =============================================================================
+# Dependency Checker
+# =============================================================================
+
+class DependencyChecker:
+    """Check and install system dependencies."""
+
+    @staticmethod
+    def check_python() -> bool:
+        """Check if Python 3.8+ is available."""
+        version = sys.version_info
+        if version.major >= 3 and version.minor >= 8:
+            print_status("ok", f"Python {version.major}.{version.minor}.{version.micro} detected")
+            return True
+        print_status("fail", f"Python 3.8+ required, found {version.major}.{version.minor}")
+        return False
+
+    @staticmethod
+    def check_openssl() -> bool:
+        """Check if OpenSSL is installed."""
+        success, stdout, _ = run_command(["openssl", "version"])
+        if success and stdout:
+            print_status("ok", f"OpenSSL detected: {stdout.strip()}")
+            return True
+        print_status("fail", "OpenSSL not found")
+        return False
+
+    @staticmethod
+    def check_flutter() -> bool:
+        """Check if Flutter is installed."""
+        success, stdout, _ = run_command(["flutter", "--version"])
+        if success:
+            # Extract first line which contains version
+            version_line = stdout.split('\n')[0] if stdout else "unknown"
+            print_status("ok", f"Flutter detected: {version_line}")
+            return True
+        print_status("fail", "Flutter not found")
+        return False
+
+    @staticmethod
+    def check_pip() -> bool:
+        """Check if pip is available."""
+        success, stdout, _ = run_command([sys.executable, "-m", "pip", "--version"])
+        if success:
+            print_status("ok", f"pip detected: {stdout.strip()[:50]}...")
+            return True
+        print_status("fail", "pip not found")
+        return False
+
+    @staticmethod
+    def install_openssl_linux() -> bool:
+        """Install OpenSSL on Linux."""
+        print_status("run", "Attempting to install OpenSSL...")
+        
+        # Detect package manager
+        pkg_managers = [
+            (["apt-get", "--version"], ["sudo", "apt-get", "install", "-y", "openssl"]),
+            (["dnf", "--version"], ["sudo", "dnf", "install", "-y", "openssl"]),
+            (["yum", "--version"], ["sudo", "yum", "install", "-y", "openssl"]),
+            (["pacman", "--version"], ["sudo", "pacman", "-S", "--noconfirm", "openssl"]),
+            (["zypper", "--version"], ["sudo", "zypper", "install", "-y", "openssl"]),
+        ]
+        
+        for check_cmd, install_cmd in pkg_managers:
+            success, _, _ = run_command(check_cmd)
+            if success:
+                success, stdout, stderr = run_command(install_cmd, timeout=300)
+                if success:
+                    print_status("ok", "OpenSSL installed successfully")
+                    return True
+                else:
+                    print_status("fail", f"Failed to install OpenSSL: {stderr}")
+                    return False
+        
+        print_status("fail", "No supported package manager found")
+        return False
+
+    @staticmethod
+    def install_openssl_windows() -> bool:
+        """Guide user to install OpenSSL on Windows."""
+        print_status("info", "OpenSSL installation on Windows:")
+        print("      Option 1: winget install ShiningLight.OpenSSL")
+        print("      Option 2: choco install openssl")
+        print("      Option 3: Download from https://slproweb.com/products/Win32OpenSSL.html")
+        
+        # Try winget first
+        success, _, _ = run_command(["winget", "--version"])
+        if success:
+            print_status("run", "Attempting installation via winget...")
+            success, stdout, stderr = run_command(
+                ["winget", "install", "ShiningLight.OpenSSL", "--accept-package-agreements", "--accept-source-agreements"],
+                timeout=300
+            )
+            if success:
+                print_status("ok", "OpenSSL installed via winget")
+                return True
+        
+        # Try chocolatey
+        success, _, _ = run_command(["choco", "--version"])
+        if success:
+            print_status("run", "Attempting installation via Chocolatey...")
+            success, stdout, stderr = run_command(
+                ["choco", "install", "openssl", "-y"],
+                timeout=300
+            )
+            if success:
+                print_status("ok", "OpenSSL installed via Chocolatey")
+                return True
+        
+        print_status("warn", "Please install OpenSSL manually and add to PATH")
+        return False
+
+    def install_openssl(self) -> bool:
+        """Install OpenSSL based on OS."""
+        if SYSTEM.startswith("linux"):
+            return self.install_openssl_linux()
+        elif SYSTEM.startswith("win"):
+            return self.install_openssl_windows()
+        else:
+            print_status("warn", f"Unsupported OS: {SYSTEM}")
+            return False
+
+    def check_all(self) -> dict:
+        """Check all dependencies and return status."""
+        print_header("Checking System Dependencies")
+        return {
+            "python": self.check_python(),
+            "pip": self.check_pip(),
+            "openssl": self.check_openssl(),
+            "flutter": self.check_flutter(),
+        }
+
+
+# =============================================================================
+# Firewall Manager
+# =============================================================================
+
+class FirewallManager:
+    """Configure firewall rules for the application."""
+
+    def __init__(self):
+        self.needs_elevation = True
+
+    def _get_firewall_tool_linux(self) -> str:
+        """Detect available firewall tool on Linux."""
+        tools = ["ufw", "firewall-cmd", "iptables"]
+        for tool in tools:
+            if shutil.which(tool):
+                return tool
+        return ""
+
+    def allow_port_linux(self, port: int, protocol: str) -> bool:
+        """Allow a port on Linux firewall."""
+        tool = self._get_firewall_tool_linux()
+        proto = protocol.lower()
+
+        if tool == "ufw":
+            success, _, stderr = run_command(["sudo", "ufw", "allow", f"{port}/{proto}"])
+            return success
+        elif tool == "firewall-cmd":
+            success, _, stderr = run_command([
+                "sudo", "firewall-cmd", "--permanent",
+                f"--add-port={port}/{proto}"
+            ])
+            if success:
+                run_command(["sudo", "firewall-cmd", "--reload"])
+            return success
+        elif tool == "iptables":
+            proto_flag = "-p"
+            success, _, stderr = run_command([
+                "sudo", "iptables", "-A", "INPUT",
+                proto_flag, proto,
+                "--dport", str(port),
+                "-j", "ACCEPT"
+            ])
+            return success
+        else:
+            print_status("warn", "No firewall tool found. Manual configuration may be needed.", 1)
+            return True  # Return True to continue installation
+
+    def allow_port_windows(self, port: int, protocol: str) -> bool:
+        """Allow a port on Windows firewall."""
+        proto = protocol.upper()
+        rule_name = f"LANFXplorer_{proto}_{port}"
+
+        # Delete existing rule if any
+        run_command([
+            "netsh", "advfirewall", "firewall", "delete", "rule",
+            f"name={rule_name}"
+        ])
+
+        # Add inbound rule
+        success, _, stderr = run_command([
+            "netsh", "advfirewall", "firewall", "add", "rule",
+            f"name={rule_name}",
+            "dir=in",
+            "action=allow",
+            f"protocol={proto}",
+            f"localport={port}"
+        ])
+        return success
+
+    def allow_port(self, port: int, protocol: str) -> bool:
+        """Allow a port in the firewall."""
+        if SYSTEM.startswith("linux"):
+            return self.allow_port_linux(port, protocol)
+        elif SYSTEM.startswith("win"):
+            return self.allow_port_windows(port, protocol)
+        return False
+
+    def configure_all_ports(self) -> bool:
+        """Configure all required ports."""
+        print_header("Configuring Firewall Rules")
+
+        if self.needs_elevation:
+            print_status("info", "Firewall configuration may require elevated privileges")
+
+        all_success = True
+        for port, (protocol, description) in PORTS.items():
+            success = self.allow_port(port, protocol)
+            if success:
+                print_status("ok", f"Port {port}/{protocol} - {description}", 1)
+            else:
+                print_status("fail", f"Port {port}/{protocol} - {description}", 1)
+                all_success = False
+
+        if SYSTEM.startswith("linux"):
+            tool = self._get_firewall_tool_linux()
+            if tool == "ufw":
+                run_command(["sudo", "ufw", "--force", "enable"])
+                print_status("ok", "UFW firewall enabled")
+        
+        # Drop back to normal user privileges after firewall config
+        drop_privileges()
+
+        return all_success
+
+
+# =============================================================================
+# Requirements Installer
+# =============================================================================
+
+class RequirementsInstaller:
+    """Install Python requirements."""
+
+    def __init__(self):
+        self.requirements_file = APP_DIR / "requirements.txt"
+        self.old_requirements_file = APP_DIR / "requirement.txtt"
+
+    def create_requirements_file(self):
+        """Create a proper requirements.txt file."""
+        requirements = [
+            "aioquic",
+            "streamlit",
+            "paramiko",
+            "requests",
+            "flask",
+            "flask-cors",
+            "python-dotenv",
+            "elevate",
+            "scapy",
+            "ownca",
+            "cryptography",
+            "pyOpenSSL",
+            "service-identity",
+            "bcrypt",
+        ]
+
+        with open(self.requirements_file, "w") as f:
+            f.write("\n".join(requirements) + "\n")
+        
+        print_status("ok", f"Created {self.requirements_file}")
+
+    def upgrade_pip(self) -> bool:
+        """Upgrade pip to latest version."""
+        print_status("run", "Upgrading pip...")
+        success, _, stderr = run_command(
+            [sys.executable, "-m", "pip", "install", "--upgrade", "pip"],
+            timeout=120
+        )
+        if success:
+            print_status("ok", "pip upgraded")
+        else:
+            print_status("warn", f"pip upgrade failed: {stderr[:50]}")
+        return success
+
+    def install_requirements(self) -> bool:
+        """Install Python requirements."""
+        print_header("Installing Python Requirements")
+
+        # Create requirements.txt if it doesn't exist
+        if not self.requirements_file.exists():
+            self.create_requirements_file()
+
+        # Upgrade pip first
+        self.upgrade_pip()
+
+        # Install requirements
+        print_status("run", "Installing packages from requirements.txt...")
+        success, stdout, stderr = run_command(
+            [sys.executable, "-m", "pip", "install", "-r", str(self.requirements_file)],
+            timeout=600
+        )
+
+        if success:
+            print_status("ok", "All requirements installed successfully")
+            return True
+        else:
+            print_status("fail", f"Requirements installation failed")
+            print(f"      Error: {stderr[:200]}")
+            return False
+
+
+# =============================================================================
+# Directory Manager
+# =============================================================================
+
+class DirectoryManager:
+    """Manage application directories."""
+
+    def __init__(self):
+        self.home = Path.home()
+        self.lanfxplorer_dir = self.home / "Lanfxplorer"
+        self.pki_dir = APP_DIR / "pki"
+        self.pki_export_dir = APP_DIR / "pkica_export"
+
+    def ensure_lanfxplorer_dir(self) -> Path:
+        """Ensure the Lanfxplorer directory exists."""
+        self.lanfxplorer_dir.mkdir(parents=True, exist_ok=True)
+        print_status("ok", f"Lanfxplorer directory: {self.lanfxplorer_dir}")
+        return self.lanfxplorer_dir
+
+    def ensure_pki_dirs(self) -> bool:
+        """Ensure PKI directories exist."""
+        self.pki_dir.mkdir(parents=True, exist_ok=True)
+        self.pki_export_dir.mkdir(parents=True, exist_ok=True)
+        print_status("ok", f"PKI directories created")
+        return True
+
+    def setup_all(self) -> bool:
+        """Set up all required directories."""
+        print_header("Setting Up Directories")
+        self.ensure_lanfxplorer_dir()
+        self.ensure_pki_dirs()
+        return True
+
+
+# =============================================================================
+# Desktop Entry Manager
+# =============================================================================
+
+class DesktopEntryManager:
+    """Create desktop entries for the application."""
+
+    def __init__(self):
+        self.app_name = "LANFXplorer"
+        self.app_dir = APP_DIR
+        self.start_script = APP_DIR / "start.py"
+
+    def create_start_script(self):
+        """Create the start.py script."""
+        script_content = f'''#!/usr/bin/env python3
+"""
+LANFXplorer Startup Script
+Entry point for the desktop shortcut.
+"""
+import os
+import sys
+
+# Change to application directory
+os.chdir(r"{self.app_dir}")
+
+# Import and run the installer's run functionality
+from installer import AppLauncher
+
+if __name__ == "__main__":
+    launcher = AppLauncher()
+    launcher.run()
+'''
+        with open(self.start_script, "w") as f:
+            f.write(script_content)
+        
+        # Make executable on Linux
+        if SYSTEM.startswith("linux"):
+            os.chmod(self.start_script, 0o755)
+        
+        print_status("ok", f"Created start script: {self.start_script}")
+
+    def create_linux_desktop_entry(self) -> bool:
+        """Create a .desktop file on Linux."""
+        applications_dir = Path.home() / ".local" / "share" / "applications"
+        applications_dir.mkdir(parents=True, exist_ok=True)
+
+        desktop_file = applications_dir / "lanfxplorer.desktop"
+
+        # Find Python executable
+        python_exec = sys.executable
+
+        # Look for an icon (create a simple one if not exists)
+        icon_path = self.app_dir / "assets" / "icon.png"
+        if not icon_path.exists():
+            icon_path = ""  # Use default icon
+
+        desktop_content = f"""[Desktop Entry]
+Name={self.app_name}
+Comment=LAN File Explorer with QUIC Protocol
+Exec={python_exec} {self.start_script}
+Icon={icon_path if icon_path else 'network-workgroup'}
+Terminal=true
+Type=Application
+Categories=Network;FileTransfer;Utility;
+StartupNotify=true
+"""
+
+        with open(desktop_file, "w") as f:
+            f.write(desktop_content)
+
+        # Make it executable
+        os.chmod(desktop_file, 0o755)
+
+        print_status("ok", f"Created desktop entry: {desktop_file}")
+        
+        # Also create on Desktop if exists
+        desktop_path = Path.home() / "Desktop"
+        if desktop_path.exists():
+            desktop_shortcut = desktop_path / "LANFXplorer.desktop"
+            with open(desktop_shortcut, "w") as f:
+                f.write(desktop_content)
+            os.chmod(desktop_shortcut, 0o755)
+            print_status("ok", f"Created desktop shortcut: {desktop_shortcut}")
+
+        return True
+
+    def create_windows_shortcut(self) -> bool:
+        """Create a shortcut on Windows."""
+        try:
+            import winshell
+            from win32com.client import Dispatch
+        except ImportError:
+            # Fallback to PowerShell
+            return self._create_windows_shortcut_powershell()
+
+        desktop = Path(winshell.desktop())
+        shortcut_path = desktop / f"{self.app_name}.lnk"
+
+        shell = Dispatch('WScript.Shell')
+        shortcut = shell.CreateShortCut(str(shortcut_path))
+        shortcut.Targetpath = sys.executable
+        shortcut.Arguments = str(self.start_script)
+        shortcut.WorkingDirectory = str(self.app_dir)
+        shortcut.Description = "LANFXplorer - LAN File Transfer"
+        shortcut.save()
+
+        print_status("ok", f"Created Windows shortcut: {shortcut_path}")
+        return True
+
+    def _create_windows_shortcut_powershell(self) -> bool:
+        """Create Windows shortcut using PowerShell."""
+        desktop = Path.home() / "Desktop"
+        shortcut_path = desktop / f"{self.app_name}.lnk"
+
+        ps_script = f'''
+$WshShell = New-Object -comObject WScript.Shell
+$Shortcut = $WshShell.CreateShortcut("{shortcut_path}")
+$Shortcut.TargetPath = "{sys.executable}"
+$Shortcut.Arguments = '"{self.start_script}"'
+$Shortcut.WorkingDirectory = "{self.app_dir}"
+$Shortcut.Description = "LANFXplorer - LAN File Transfer"
+$Shortcut.Save()
+'''
+        success, _, stderr = run_command([
+            "powershell", "-NoProfile", "-Command", ps_script
+        ])
+
+        if success:
+            print_status("ok", f"Created Windows shortcut: {shortcut_path}")
+        else:
+            print_status("fail", f"Failed to create Windows shortcut: {stderr}")
+
+        return success
+
+    def create_desktop_entry(self) -> bool:
+        """Create desktop entry based on OS."""
+        print_header("Creating Desktop Entry")
+
+        # First create the start script
+        self.create_start_script()
+
+        if SYSTEM.startswith("linux"):
+            return self.create_linux_desktop_entry()
+        elif SYSTEM.startswith("win"):
+            return self.create_windows_shortcut()
+        else:
+            print_status("warn", f"Desktop entry not supported on {SYSTEM}")
+            return False
+
+
+# =============================================================================
+# Application Launcher
+# =============================================================================
+
+class AppLauncher:
+    """Launch the application components."""
+
+    def __init__(self):
+        self.app_dir = APP_DIR
+        self.processes = []
+
+    def start_process(self, script: str, name: str, wait: bool = False) -> subprocess.Popen:
+        """Start a Python script as a subprocess."""
+        script_path = self.app_dir / script
+        if not script_path.exists():
+            print_status("fail", f"{name}: Script not found - {script_path}")
+            return None
+
+        print_status("run", f"Starting {name}...")
+        
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, str(script_path)],
+                cwd=str(self.app_dir),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            
+            if wait:
+                # Wait for process to complete
+                proc.wait()
+                if proc.returncode == 0:
+                    print_status("ok", f"{name} completed")
+                else:
+                    print_status("fail", f"{name} failed with code {proc.returncode}")
+            else:
+                # Give it a moment to start
+                time.sleep(1)
+                if proc.poll() is None:
+                    print_status("ok", f"{name} started (PID: {proc.pid})")
+                    self.processes.append((name, proc))
+                else:
+                    _, stderr = proc.communicate()
+                    print_status("fail", f"{name} failed to start: {stderr.decode()[:100]}")
+                    return None
+            
+            return proc
+        except Exception as e:
+            print_status("fail", f"{name} error: {str(e)}")
+            return None
+
+    def start_flutter(self) -> subprocess.Popen:
+        """Start the Flutter application."""
+        print_status("run", "Starting Flutter application...")
+        
+        try:
+            proc = subprocess.Popen(
+                ["flutter", "run", "-d", "linux"],
+                cwd=str(self.app_dir),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            
+            time.sleep(2)
+            if proc.poll() is None:
+                print_status("ok", f"Flutter started (PID: {proc.pid})")
+                self.processes.append(("Flutter", proc))
+                return proc
+            else:
+                _, stderr = proc.communicate()
+                print_status("fail", f"Flutter failed to start: {stderr.decode()[:100]}")
+                return None
+        except FileNotFoundError:
+            print_status("fail", "Flutter not found in PATH")
+            return None
+        except Exception as e:
+            print_status("fail", f"Flutter error: {str(e)}")
+            return None
+
+    def stop_all(self):
+        """Stop all running processes."""
+        print_status("info", "Stopping all services...")
+        for name, proc in self.processes:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                    print_status("ok", f"{name} stopped")
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    print_status("warn", f"{name} killed")
+
+    def run(self):
+        """Run the complete application startup sequence."""
+        print_header("Starting LANFXplorer")
+
+        try:
+            # 1. Run startsetup.py (wait for it to complete)
+            self.start_process("startsetup.py", "PKI Setup", wait=True)
+            
+            # 2. Start recive.py (background)
+            receiver = self.start_process("recive.py", "QUIC Receiver")
+            if not receiver:
+                print_status("fail", "Cannot start without receiver!")
+                return
+            
+            # Wait a bit for receiver to initialize
+            time.sleep(2)
+            
+            # 3. Start api_bridge.py (background)
+            api = self.start_process("api_bridge.py", "API Bridge")
+            if not api:
+                print_status("warn", "API Bridge failed to start, continuing...")
+            
+            # Wait for API to be ready
+            time.sleep(2)
+            
+            # 4. Start Flutter
+            flutter = self.start_flutter()
+            
+            print_header("LANFXplorer Running")
+            print_status("info", "Services running:")
+            for name, proc in self.processes:
+                print(f"        • {name} (PID: {proc.pid})")
+            print("\n   Press Ctrl+C to stop all services\n")
+
+            # Wait for Flutter to exit or Ctrl+C
+            if flutter:
+                flutter.wait()
+            else:
+                # If no Flutter, keep running until interrupted
+                while True:
+                    time.sleep(1)
+                    # Check if any critical process died
+                    if receiver and receiver.poll() is not None:
+                        print_status("warn", "Receiver process died!")
+                        break
+
+        except KeyboardInterrupt:
+            print("\n")
+            print_status("info", "Shutdown requested...")
+        finally:
+            self.stop_all()
+
+
+# =============================================================================
+# Main Installer
+# =============================================================================
+
+class Installer:
+    """Main installer class that orchestrates installation."""
+
+    def __init__(self):
+        self.dep_checker = DependencyChecker()
+        self.firewall_mgr = FirewallManager()
+        self.req_installer = RequirementsInstaller()
+        self.dir_manager = DirectoryManager()
+        self.desktop_mgr = DesktopEntryManager()
+        self.launcher = AppLauncher()
+
+    def check_dependencies(self) -> bool:
+        """Check all dependencies."""
+        results = self.dep_checker.check_all()
+        
+        # OpenSSL is critical
+        if not results["openssl"]:
+            print_status("info", "Attempting to install OpenSSL...")
+            if not self.dep_checker.install_openssl():
+                print_status("warn", "OpenSSL installation failed. Please install manually.")
+        
+        return results["python"] and results["pip"]
+
+    def configure_firewall(self) -> bool:
+        """Configure firewall rules."""
+        return self.firewall_mgr.configure_all_ports()
+
+    def install_requirements(self) -> bool:
+        """Install Python requirements."""
+        return self.req_installer.install_requirements()
+
+    def setup_directories(self) -> bool:
+        """Set up required directories."""
+        return self.dir_manager.setup_all()
+
+    def create_desktop_entry(self) -> bool:
+        """Create desktop entry."""
+        return self.desktop_mgr.create_desktop_entry()
+
+    def full_install(self) -> bool:
+        """Perform full installation."""
+        print_header("LANFXplorer Installer")
+        print(f"   Platform: {platform.system()} {platform.release()}")
+        print(f"   Python: {sys.version.split()[0]}")
+        print(f"   App Directory: {APP_DIR}")
+
+        steps = [
+            ("Checking dependencies", self.check_dependencies),
+            ("Installing requirements", self.install_requirements),
+            ("Setting up directories", self.setup_directories),
+            ("Configuring firewall", self.configure_firewall),
+            ("Creating desktop entry", self.create_desktop_entry),
+        ]
+
+        all_success = True
+        for step_name, step_func in steps:
+            try:
+                if not step_func():
+                    print_status("warn", f"Step '{step_name}' had issues")
+                    all_success = False
+            except Exception as e:
+                print_status("fail", f"Step '{step_name}' failed: {str(e)}")
+                all_success = False
+
+        if all_success:
+            print_header("Installation Complete!")
+            print_status("ok", "LANFXplorer is ready to use")
+            print_status("info", "Run 'python installer.py --run' to start the application")
+            print_status("info", "Or use the desktop shortcut")
+        else:
+            print_header("Installation Completed with Warnings")
+            print_status("warn", "Some steps had issues but installation may still work")
+
+        return all_success
+
+    def run_app(self):
+        """Run the application."""
+        self.launcher.run()
+
+
+def main():
+    """Run full installation when called directly."""
+    installer = Installer()
+    installer.full_install()
+    
+
+if __name__ == "__main__":
+    main()
