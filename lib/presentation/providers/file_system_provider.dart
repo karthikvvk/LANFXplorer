@@ -19,6 +19,10 @@ class FileSystemProvider extends ChangeNotifier {
   // Root path restriction - set from outDir in environment
   String? _rootPath;
 
+  // Error state for displaying connection/API errors
+  String? _localError;
+  String? _remoteError;
+
   List<FileItem> get localFiles => _localFiles;
   List<FileItem> get remoteFiles => _remoteFiles;
   String get localCurrentPath => _localCurrentPath;
@@ -31,6 +35,10 @@ class FileSystemProvider extends ChangeNotifier {
       _localFiles.where((f) => f.isSelected).toList();
   List<FileItem> get selectedRemoteFiles =>
       _remoteFiles.where((f) => f.isSelected).toList();
+
+  // Error getters
+  String? get localError => _localError;
+  String? get remoteError => _remoteError;
 
   /// Set the root path for path restrictions
   void setRootPath(String path) {
@@ -60,6 +68,7 @@ class FileSystemProvider extends ChangeNotifier {
 
   Future<void> loadLocalFiles([String? path]) async {
     _isLoadingLocal = true;
+    _localError = null; // Clear previous error
     notifyListeners();
 
     if (path != null) {
@@ -80,8 +89,13 @@ class FileSystemProvider extends ChangeNotifier {
         _localFiles = await _apiService.getFiles(
           _localCurrentPath,
         );
+
+        // If we got files, clear any error
+        _localError = null;
       } else {
         _localFiles = [];
+        _localError =
+            'Backend not connected. Check if api_bridge.py is running.';
       }
     } catch (e, stack) {
       AppLogger.error(
@@ -90,6 +104,8 @@ class FileSystemProvider extends ChangeNotifier {
         stackTrace: stack,
       );
       _localFiles = [];
+      _localError =
+          'Peer not up or backend disconnected.\nCheck the status and network.';
     }
 
     _isLoadingLocal = false;
@@ -98,6 +114,7 @@ class FileSystemProvider extends ChangeNotifier {
 
   Future<void> loadRemoteFiles([String? path, String? host]) async {
     _isLoadingRemote = true;
+    _remoteError = null; // Clear previous error
     notifyListeners();
 
     if (path != null) {
@@ -120,11 +137,19 @@ class FileSystemProvider extends ChangeNotifier {
             _remoteCurrentPath = parentDir;
           }
         }
+        // Clear error on success
+        _remoteError = null;
+      } else {
+        _remoteFiles = [];
+        _remoteError =
+            'Backend not connected. Check if api_bridge.py is running.';
       }
     } catch (e, stack) {
       AppLogger.error('Failed to load remote files',
           error: e, stackTrace: stack);
       _remoteFiles = [];
+      _remoteError =
+          'Peer not up or backend disconnected.\nCheck the status and network.';
     }
 
     _isLoadingRemote = false;

@@ -165,7 +165,8 @@ def load_env_vars():
 
     global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert 
     
-    load_dotenv()
+    # override=True ensures .env values override any existing environment variables
+    load_dotenv(override=True)
     
 
     pwd = os.getenv("PWD", os.getcwd())

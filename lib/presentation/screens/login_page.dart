@@ -25,6 +25,7 @@ class _LoginPageState extends State<LoginPage> {
   bool _obscureConfirmPassword = true;
   bool _isLoading = false;
   bool _isCheckingCredentials = true;
+  String? _directoryError; // Error message when invalid directory selected
 
   @override
   void initState() {
@@ -50,15 +51,33 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  String _getDefaultDownloadsPath() {
+  /// Get the allowed root directory - only paths within this are allowed
+  String _getAllowedRootPath() {
     if (Platform.isLinux || Platform.isMacOS) {
       final home = Platform.environment['HOME'] ?? '/home';
-      return '$home/Downloads';
+      return '$home/Lanfxplorer';
     } else if (Platform.isWindows) {
       final userProfile = Platform.environment['USERPROFILE'] ?? 'C:\\Users';
-      return '$userProfile\\Downloads';
+      return '$userProfile\\Lanfxplorer';
     }
-    return 'Downloads';
+    return 'Lanfxplorer';
+  }
+
+  /// Check if a path is within the allowed Lanfxplorer directory
+  bool _isPathAllowed(String path) {
+    final allowedRoot = _getAllowedRootPath();
+    // Normalize paths for comparison
+    final normalizedPath = path.replaceAll('\\', '/');
+    final normalizedRoot = allowedRoot.replaceAll('\\', '/');
+
+    // Path must start with the allowed root (be within Lanfxplorer folder)
+    return normalizedPath == normalizedRoot ||
+        normalizedPath.startsWith('$normalizedRoot/');
+  }
+
+  String _getDefaultDownloadsPath() {
+    // Default to Lanfxplorer folder
+    return _getAllowedRootPath();
   }
 
   @override
@@ -73,9 +92,30 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _selectDirectory() async {
     final result = await FilePicker.platform.getDirectoryPath();
     if (result != null) {
-      setState(() {
-        _defaultDirController.text = result;
-      });
+      // Validate the selected path is within allowed root
+      if (_isPathAllowed(result)) {
+        setState(() {
+          _defaultDirController.text = result;
+          _directoryError = null; // Clear any previous error
+        });
+      } else {
+        final allowedRoot = _getAllowedRootPath();
+        setState(() {
+          _directoryError =
+              'Access denied! You can only select directories within:\n$allowedRoot\n\nPlease create this folder if it doesn\'t exist.';
+        });
+        // Show snackbar as well for visibility
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                  'Invalid directory! Only paths within $allowedRoot are allowed.'),
+              backgroundColor: Theme.of(context).colorScheme.error,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      }
     }
   }
 
@@ -148,6 +188,7 @@ class _LoginPageState extends State<LoginPage> {
     _passwordController.text = 'password';
     _confirmPasswordController.text = 'password';
     _defaultDirController.text = _getDefaultDownloadsPath();
+    _directoryError = null; // Default path is always valid
     _createProfile();
   }
 
@@ -305,7 +346,7 @@ class _LoginPageState extends State<LoginPage> {
                     readOnly: true,
                     decoration: InputDecoration(
                       labelText: 'Select Default Directory',
-                      hintText: 'Downloads (default)',
+                      hintText: 'Lanfxplorer folder',
                       prefixIcon: const Icon(Icons.folder_outlined),
                       suffixIcon: IconButton(
                         icon: const Icon(Icons.folder_open),
@@ -315,18 +356,76 @@ class _LoginPageState extends State<LoginPage> {
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(AppRadius.md),
                       ),
+                      // Show error border if directory is invalid
+                      errorText: _directoryError != null ? null : null,
+                      enabledBorder: _directoryError != null
+                          ? OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(AppRadius.md),
+                              borderSide: BorderSide(
+                                  color: Theme.of(context).colorScheme.error,
+                                  width: 2),
+                            )
+                          : null,
                     ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please select a directory';
+                      }
+                      if (!_isPathAllowed(value)) {
+                        return 'Directory must be within Lanfxplorer folder';
+                      }
+                      return null;
+                    },
                     onTap: _selectDirectory,
                   )
                       .animate()
                       .fadeIn(duration: 400.ms, delay: 600.ms)
                       .slideX(begin: -0.1, end: 0),
 
+                  // Error message for invalid directory
+                  if (_directoryError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: AppSpacing.sm),
+                      child: Container(
+                        padding: const EdgeInsets.all(AppSpacing.md),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.errorContainer,
+                          borderRadius: BorderRadius.circular(AppRadius.sm),
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.error,
+                            width: 1,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.warning_amber_rounded,
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                            const SizedBox(width: AppSpacing.sm),
+                            Expanded(
+                              child: Text(
+                                _directoryError!,
+                                style: TextStyle(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onErrorContainer,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ).animate().fadeIn(duration: 200.ms).shake(),
+
                   const SizedBox(height: AppSpacing.xl),
 
-                  // Create Profile button
+                  // Create Profile button - disabled if directory is invalid
                   FilledButton(
-                    onPressed: _isLoading ? null : _createProfile,
+                    onPressed: (_isLoading || _directoryError != null)
+                        ? null
+                        : _createProfile,
                     style: FilledButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(

@@ -377,6 +377,11 @@ class _FileExplorerPane extends StatelessWidget {
         ? fileSystemProvider.selectedLocalFiles.length
         : fileSystemProvider.selectedRemoteFiles.length;
 
+    // Get error state
+    final error = isLocal
+        ? fileSystemProvider.localError
+        : fileSystemProvider.remoteError;
+
     return DragDropZone(
       enabled: isLocal,
       onFilesDropped: (paths) {
@@ -530,6 +535,7 @@ class _FileExplorerPane extends StatelessWidget {
                         scrollDirection: Axis.horizontal,
                         child: _BreadcrumbPath(
                           path: currentPath,
+                          rootPath: fileSystemProvider.rootPath,
                           isLocal: isLocal,
                           onSegmentTap: (path) {
                             if (isLocal) {
@@ -551,65 +557,102 @@ class _FileExplorerPane extends StatelessWidget {
           Expanded(
             child: isLoading
                 ? const Center(child: CircularProgressIndicator())
-                : files.isEmpty
+                : error != null
+                    // Show error message when API fails
                     ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.folder_open,
-                              size: 64,
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                            const SizedBox(height: AppSpacing.md),
-                            Text(
-                              'No files',
-                              style: context.textStyles.titleMedium,
-                            ),
-                          ],
+                        child: Padding(
+                          padding: AppSpacing.paddingXl,
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.cloud_off,
+                                size: 64,
+                                color: colorScheme.error,
+                              ),
+                              const SizedBox(height: AppSpacing.md),
+                              Text(
+                                error,
+                                style: context.textStyles.titleMedium?.copyWith(
+                                  color: colorScheme.error,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: AppSpacing.md),
+                              FilledButton.icon(
+                                onPressed: () {
+                                  if (isLocal) {
+                                    fileSystemProvider.loadLocalFiles();
+                                  } else {
+                                    fileSystemProvider.loadRemoteFiles();
+                                  }
+                                },
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('Retry'),
+                              ),
+                            ],
+                          ),
                         ),
                       )
-                    : ListView.builder(
-                        padding: const EdgeInsets.all(AppSpacing.sm),
-                        itemCount: files.length,
-                        itemBuilder: (context, index) {
-                          final file = files[index];
-                          return Padding(
-                            padding: const EdgeInsets.only(
-                              bottom: AppSpacing.xs,
-                            ),
-                            child: FileItemCard(
-                              file: file,
-                              onTap: () {
-                                if (isLocal) {
-                                  fileSystemProvider
-                                      .toggleLocalFileSelection(index);
-                                } else {
-                                  fileSystemProvider
-                                      .toggleRemoteFileSelection(index);
-                                }
-                              },
-                              onDoubleTap: file.isDirectory
-                                  ? () {
-                                      if (isLocal) {
-                                        fileSystemProvider
-                                            .loadLocalFiles(file.path);
-                                      } else {
-                                        fileSystemProvider
-                                            .loadRemoteFiles(file.path);
-                                      }
-                                    }
-                                  : null,
+                    : files.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.folder_open,
+                                  size: 64,
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                                const SizedBox(height: AppSpacing.md),
+                                Text(
+                                  'No files',
+                                  style: context.textStyles.titleMedium,
+                                ),
+                              ],
                             ),
                           )
-                              .animate()
-                              .fadeIn(
-                                duration: 200.ms,
-                                delay: (20 * index).ms,
+                        : ListView.builder(
+                            padding: const EdgeInsets.all(AppSpacing.sm),
+                            itemCount: files.length,
+                            itemBuilder: (context, index) {
+                              final file = files[index];
+                              return Padding(
+                                padding: const EdgeInsets.only(
+                                  bottom: AppSpacing.xs,
+                                ),
+                                child: FileItemCard(
+                                  file: file,
+                                  onTap: () {
+                                    if (isLocal) {
+                                      fileSystemProvider
+                                          .toggleLocalFileSelection(index);
+                                    } else {
+                                      fileSystemProvider
+                                          .toggleRemoteFileSelection(index);
+                                    }
+                                  },
+                                  onDoubleTap: file.isDirectory
+                                      ? () {
+                                          if (isLocal) {
+                                            fileSystemProvider
+                                                .loadLocalFiles(file.path);
+                                          } else {
+                                            fileSystemProvider
+                                                .loadRemoteFiles(file.path);
+                                          }
+                                        }
+                                      : null,
+                                ),
                               )
-                              .slideX(begin: 0.1, end: 0);
-                        },
-                      ),
+                                  .animate()
+                                  .fadeIn(
+                                    duration: 200.ms,
+                                    delay: (20 * index).ms,
+                                  )
+                                  .slideX(begin: 0.1, end: 0);
+                            },
+                          ),
           ),
         ],
       ),
@@ -618,13 +661,16 @@ class _FileExplorerPane extends StatelessWidget {
 }
 
 /// Clickable breadcrumb path widget that displays path segments as clickable buttons
+/// Only shows segments from rootPath onwards to hide sensitive parent paths
 class _BreadcrumbPath extends StatelessWidget {
   final String path;
+  final String? rootPath;
   final bool isLocal;
   final void Function(String path) onSegmentTap;
 
   const _BreadcrumbPath({
     required this.path,
+    this.rootPath,
     required this.isLocal,
     required this.onSegmentTap,
   });
@@ -633,78 +679,78 @@ class _BreadcrumbPath extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    // Split path into segments
+    // Normalize paths
     final normalizedPath = path.replaceAll('\\', '/');
-    final segments =
-        normalizedPath.split('/').where((s) => s.isNotEmpty).toList();
+    final normalizedRoot = (rootPath ?? '/').replaceAll('\\', '/');
 
-    // Handle root path
-    final isAbsolute = normalizedPath.startsWith('/');
-
-    if (segments.isEmpty) {
-      return InkWell(
-        onTap: () => onSegmentTap('/'),
-        borderRadius: BorderRadius.circular(4),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-          child: Text(
-            '/',
-            style: context.textStyles.bodySmall?.copyWith(
-              color: colorScheme.primary,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ),
-      );
+    // Get relative path from root (only show segments from root onwards)
+    String displayPath;
+    if (normalizedPath.startsWith(normalizedRoot)) {
+      // Remove root prefix to get relative path
+      displayPath = normalizedPath.substring(normalizedRoot.length);
+      if (displayPath.startsWith('/')) {
+        displayPath = displayPath.substring(1);
+      }
+    } else {
+      displayPath = normalizedPath;
     }
+
+    // Split into segments (only the relative part)
+    final segments = displayPath.split('/').where((s) => s.isNotEmpty).toList();
 
     final List<Widget> widgets = [];
 
-    // Add root if absolute path
-    if (isAbsolute) {
-      widgets.add(
-        InkWell(
-          onTap: () => onSegmentTap('/'),
-          borderRadius: BorderRadius.circular(4),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-            child: Text(
-              '/',
-              style: context.textStyles.bodySmall?.copyWith(
-                color: colorScheme.primary,
-                fontWeight: FontWeight.w500,
+    // Add root icon/label (represents the Lanfxplorer folder)
+    final rootName =
+        normalizedRoot.split('/').where((s) => s.isNotEmpty).lastOrNull ??
+            'Root';
+    widgets.add(
+      InkWell(
+        onTap: rootPath != null ? () => onSegmentTap(rootPath!) : null,
+        borderRadius: BorderRadius.circular(4),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.home, size: 14, color: colorScheme.primary),
+              const SizedBox(width: 4),
+              Text(
+                rootName,
+                style: context.textStyles.bodySmall?.copyWith(
+                  color: colorScheme.primary,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
-            ),
+            ],
           ),
         ),
-      );
-    }
+      ),
+    );
 
-    // Add each segment
+    // Add each segment from root onwards
     for (int i = 0; i < segments.length; i++) {
       final segment = segments[i];
       final isLast = i == segments.length - 1;
 
-      // Build path up to this segment
-      final pathToSegment = isAbsolute
-          ? '/${segments.sublist(0, i + 1).join('/')}'
-          : segments.sublist(0, i + 1).join('/');
+      // Build full path for this segment
+      final relativePath = segments.sublist(0, i + 1).join('/');
+      final fullPath =
+          rootPath != null ? '$normalizedRoot/$relativePath' : '/$relativePath';
 
-      // Add separator if not first (and not after root)
-      if (i > 0 || isAbsolute) {
-        widgets.add(
-          Icon(
-            Icons.chevron_right,
-            size: 16,
-            color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
-          ),
-        );
-      }
+      // Add separator
+      widgets.add(
+        Icon(
+          Icons.chevron_right,
+          size: 16,
+          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+        ),
+      );
 
       // Add segment button
       widgets.add(
         InkWell(
-          onTap: isLast ? null : () => onSegmentTap(pathToSegment),
+          onTap: isLast ? null : () => onSegmentTap(fullPath),
           borderRadius: BorderRadius.circular(4),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
