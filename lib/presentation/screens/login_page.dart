@@ -1,5 +1,6 @@
 import 'package:files/presentation/providers/env_provider.dart';
 import 'package:files/theme.dart';
+import 'package:files/core/constants/path_security.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
@@ -51,28 +52,14 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  /// Get the allowed root directory - only paths within this are allowed
+  /// Get the allowed root directory - uses shared path_security module
   String _getAllowedRootPath() {
-    if (Platform.isLinux || Platform.isMacOS) {
-      final home = Platform.environment['HOME'] ?? '/home';
-      return '$home/Lanfxplorer';
-    } else if (Platform.isWindows) {
-      final userProfile = Platform.environment['USERPROFILE'] ?? 'C:\\Users';
-      return '$userProfile\\Lanfxplorer';
-    }
-    return 'Lanfxplorer';
+    return getLanfxplorerRoot();
   }
 
-  /// Check if a path is within the allowed Lanfxplorer directory
+  /// Check if a path is within the allowed Lanfxplorer directory - uses shared path_security module
   bool _isPathAllowed(String path) {
-    final allowedRoot = _getAllowedRootPath();
-    // Normalize paths for comparison
-    final normalizedPath = path.replaceAll('\\', '/');
-    final normalizedRoot = allowedRoot.replaceAll('\\', '/');
-
-    // Path must start with the allowed root (be within Lanfxplorer folder)
-    return normalizedPath == normalizedRoot ||
-        normalizedPath.startsWith('$normalizedRoot/');
+    return isPathAllowed(path);
   }
 
   String _getDefaultDownloadsPath() {

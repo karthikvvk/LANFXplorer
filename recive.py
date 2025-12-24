@@ -5,6 +5,7 @@ import sys
 import getpass
 from startsetup import load_env_vars
 from receiver_api_functions import start_receiver, stop_receiver
+from path_security import get_lanfxplorer_root, validate_path_access, ensure_lanfxplorer_directory
 
 def on_file_received(filepath: str, filesize: int) -> None:
 
@@ -19,8 +20,20 @@ async def main() -> None:
     cert_path = env.get("certi") or "cert.pem"
     key_path = env.get("key") or "key.pem"
     ca_cert = env.get("ca_cert") or env.get("CA_CERT")
-    out_dir = env.get("out_dir") or os.getcwd()
     user = env.get("user") or getpass.getuser()
+    
+    # SECURITY: Use Lanfxplorer directory as default, validate configured out_dir
+    configured_out_dir = env.get("out_dir")
+    if configured_out_dir:
+        is_valid, error_msg = validate_path_access(configured_out_dir)
+        if not is_valid:
+            print(f"[receiver] SECURITY WARNING: {error_msg}")
+            print(f"[receiver] Using default Lanfxplorer directory instead.")
+            out_dir = ensure_lanfxplorer_directory()
+        else:
+            out_dir = configured_out_dir
+    else:
+        out_dir = ensure_lanfxplorer_directory()
 
     if not os.path.isfile(cert_path):
         print(f"[receiver] ERROR: certificate file not found: {cert_path}")

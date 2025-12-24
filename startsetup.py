@@ -4,7 +4,7 @@ import os
 import platform
 import re, subprocess
 from dotenv import set_key, load_dotenv
-# from scanner import update_env
+from path_security import get_lanfxplorer_root, ensure_lanfxplorer_directory
 
 pwd = os.getcwd()
 user = getpass.getuser()
@@ -17,8 +17,10 @@ gateway = None
 host_ip = None
 cidr = None
 port = 4433
-out_dir = pwd
-src_dir = pwd
+# Use secure default paths - $HOME/Lanfxplorer
+_secure_root = get_lanfxplorer_root()
+out_dir = _secure_root
+src_dir = _secure_root
 key = os.path.join(pwd, "key.pem")
 certi = os.path.join(pwd, "cert.pem")
 dest_host = ""
@@ -234,6 +236,10 @@ def write_env():
     if "key.pem" not in ls or "cert.pem" not in ls:
         os.system("""openssl req -x509 -nodes -newkey rsa:2048 -keyout key.pem -out cert.pem  -days 365 -subj "/CN=quic-server.local\"""")
     get_network_info()
+    
+    # Ensure Lanfxplorer directory exists and use it for OUTDIR/SRCDIR
+    secure_root = ensure_lanfxplorer_directory()
+    
     env_vars = {
         "HOST": host_ip,
         "SUBNET": subnet,
@@ -245,8 +251,8 @@ def write_env():
         "SYSTEM": sys,
         "INTERFACE": interface,
         "PORT": port,
-        "OUTDIR": out_dir,
-        "SRCDIR": src_dir,
+        "OUTDIR": secure_root,  # Use secure Lanfxplorer path
+        "SRCDIR": secure_root,  # Use secure Lanfxplorer path
         "CERTI": certi,
         "KEY": key,
         "DEST_HOST": dest_host,

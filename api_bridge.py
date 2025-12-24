@@ -12,6 +12,13 @@ import asyncio
 from sender_api_functions import quic_connect, send_file, close_connection 
 from pki.store import PeerStore
 from pki.utils import fingerprint_pem, load_cert_pem
+from path_security import (
+    get_lanfxplorer_root,
+    validate_path_access,
+    is_path_within_root,
+    is_path_at_minimum_depth,
+    ensure_lanfxplorer_directory
+)
 
 
 app = Flask(__name__)
@@ -27,74 +34,13 @@ from threading import Lock
 from wifi_speed import estimate_transfer_time_seconds, get_wifi_speed
 
 # ==================== PATH RESTRICTION HELPERS ====================
+# Path security functions imported from path_security module
+# get_lanfxplorer_root(), validate_path_access(), is_path_within_root(),
+# is_path_at_minimum_depth() are all imported at the top of this file.
+
 def get_root_path():
-    """Get the configured root path from environment (OUTDIR)."""
-    env = load_env_vars()
-    root_path = env.get("out_dir") or env.get("src_dir") or env.get("pwd", os.getcwd())
-    return os.path.normpath(os.path.abspath(root_path))
-
-
-def is_path_at_minimum_depth(path: str) -> bool:
-    """
-    Check if path is at minimum required depth.
-    Paths at /home/user level or above are NOT allowed.
-    Must be at least /home/user/something (3 levels deep).
-    
-    Examples:
-        /home/user          -> False (too shallow)
-        /home/user/Downloads -> True (ok)
-        /home               -> False (too shallow)
-        /                   -> False (too shallow)
-    """
-    normalized = os.path.normpath(os.path.abspath(path))
-    parts = [p for p in normalized.split(os.sep) if p]
-    
-    # Must have at least 3 parts: e.g., ['home', 'user', 'something']
-    # This ensures we're below /home/user level
-    return len(parts) >= 3
-
-
-def is_path_within_root(requested_path: str, root_path: str) -> bool:
-    """
-    Check if requested_path is within or equal to root_path.
-    Handles path traversal attempts like '../'.
-    
-    Args:
-        requested_path: The path being requested
-        root_path: The allowed root directory
-        
-    Returns:
-        True if requested_path is within root_path, False otherwise
-    """
-    # Normalize and get absolute paths
-    requested_abs = os.path.normpath(os.path.abspath(requested_path))
-    root_abs = os.path.normpath(os.path.abspath(root_path))
-    
-    # Check if requested path starts with root path
-    # We add os.sep to prevent /home/user/test matching /home/user/testing
-    if requested_abs == root_abs:
-        return True
-    return requested_abs.startswith(root_abs + os.sep)
-
-
-def validate_path_access(path: str) -> tuple:
-    """
-    Validate that a path is accessible under the current restrictions.
-    
-    Returns:
-        (is_valid, error_message) tuple
-    """
-    root_path = get_root_path()
-    
-    # First check: Is the ROOT_PATH itself at a safe depth?
-    if not is_path_at_minimum_depth(root_path):
-        return False, f"Root path '{root_path}' is too shallow. Must be below /home/user level."
-    
-    # Second check: Is the requested path within the root?
-    if not is_path_within_root(path, root_path):
-        return False, f"Access denied: Path '{path}' is outside allowed directory '{root_path}'"
-    
-    return True, ""
+    """Get the configured root path - uses Lanfxplorer directory."""
+    return get_lanfxplorer_root()
 
 # ==================================================================
 
@@ -266,136 +212,136 @@ def list_directory():
     List directory contents on THIS peer
     POST body: {"path": "/absolute/path"}
     """
-    try:
-        data = request.get_json(silent=True) or {}
-        path = data.get("path")
+    # try:
+    data = request.get_json(silent=True) or {}
+    path = data.get("path")
 
-        if not path:
-            return jsonify({"status": "error", "message": "path is required"}), 400
+    if not path:
+        return jsonify({"status": "error", "message": "path is required"}), 400
 
-        remote_host = data.get("remote_host")
-        # Check if we need to proxy this request
-        if remote_host:
-             # If remote_host is THIS machine, treat as local
-            env = load_env_vars()
-            my_ip = env.get("host")
-            
-            if remote_host != my_ip and remote_host != "127.0.0.1" and remote_host != "localhost":
-                 print(f"[*] Proxying listdir request for {path} to {remote_host}")
-                 try:
-                     # Proxy the request to the remote host
-                     # We forward the same payload but WITHOUT the remote_host field to prevent infinite loops
-                     # in case of misconfiguration, although the check above prevents immediate self-loop.
-                     
-                     proxy_payload = {"path": path} # Only send path
-                     
-                     resp = requests.post(
-                         f"http://{remote_host}:5000/listdir",
-                         json=proxy_payload,
-                         timeout=10
-                     )
-                     
-                     if resp.status_code == 200:
-                         return jsonify(resp.json()), 200
-                     else:
-                         return jsonify({
-                             "status": "error", 
-                             "message": f"Remote host returned {resp.status_code}: {resp.text}"
-                         }), resp.status_code
-                         
-                 except requests.exceptions.RequestException as e:
-                     print(f"[!] Proxy failed: {e}")
-                     return jsonify({
-                         "status": "error", 
-                         "message": f"Failed to contact remote host {remote_host}: {str(e)}"
-                     }), 502
+    remote_host = data.get("remote_host")
+    # Check if we need to proxy this request
+    if remote_host:
+            # If remote_host is THIS machine, treat as local
+        env = load_env_vars()
+        my_ip = env.get("host")
+        
+        if remote_host != my_ip and remote_host != "127.0.0.1" and remote_host != "localhost":
+                print(f"[*] Proxying listdir request for {path} to {remote_host}")
+                try:
+                    # Proxy the request to the remote host
+                    # We forward the same payload but WITHOUT the remote_host field to prevent infinite loops
+                    # in case of misconfiguration, although the check above prevents immediate self-loop.
+                    
+                    proxy_payload = {"path": path} # Only send path
+                    
+                    resp = requests.post(
+                        f"http://{remote_host}:5000/listdir",
+                        json=proxy_payload,
+                        timeout=10
+                    )
+                    
+                    if resp.status_code == 200:
+                        return jsonify(resp.json()), 200
+                    else:
+                        return jsonify({
+                            "status": "error", 
+                            "message": f"Remote host returned {resp.status_code}: {resp.text}"
+                        }), resp.status_code
+                        
+                except requests.exceptions.RequestException as e:
+                    print(f"[!] Proxy failed: {e}")
+                    return jsonify({
+                        "status": "error", 
+                        "message": f"Failed to contact remote host {remote_host}: {str(e)}"
+                    }), 502
 
-        path = os.path.normpath(path)
+    path = os.path.normpath(path)
 
-        # ========== PATH RESTRICTION CHECK ==========
-        is_valid, error_msg = validate_path_access(path)
-        if not is_valid:
-            print(f"[!] Path access denied: {error_msg}")
+    # ========== PATH RESTRICTION CHECK ==========
+    is_valid, error_msg = validate_path_access(path)
+    if not is_valid:
+        print(f"[!] Path access denied: {error_msg}")
+        return jsonify({
+            "status": "error",
+            "message": error_msg
+        }), 403
+    # =============================================
+
+    if not os.path.exists(path):
+        return jsonify({
+            "status": "error",
+            "message": f"Path does not exist: {path}"
+        }), 404
+
+
+    # ---------------- FILE ----------------
+    if os.path.isfile(path):
+        st = os.stat(path)
+        info = {
+            "name": os.path.basename(path),
+            "path": path,
+            "is_directory": False,
+            "size": st.st_size,
+            "mtime": datetime.utcfromtimestamp(st.st_mtime).isoformat() + "Z",
+        }
+        return jsonify({
+            "status": "success",
+            "type": "file",
+            "info": info
+        }), 200
+
+    # --------------- DIRECTORY ---------------
+    if os.path.isdir(path):
+        files = []
+
+        try:
+            entries = sorted(os.listdir(path))
+        except PermissionError:
             return jsonify({
                 "status": "error",
-                "message": error_msg
+                "message": "Permission denied"
             }), 403
-        # =============================================
 
-        if not os.path.exists(path):
-            return jsonify({
-                "status": "error",
-                "message": f"Path does not exist: {path}"
-            }), 404
-
-
-        # ---------------- FILE ----------------
-        if os.path.isfile(path):
-            st = os.stat(path)
-            info = {
-                "name": os.path.basename(path),
-                "path": path,
-                "is_directory": False,
-                "size": st.st_size,
-                "mtime": datetime.utcfromtimestamp(st.st_mtime).isoformat() + "Z",
-            }
-            return jsonify({
-                "status": "success",
-                "type": "file",
-                "info": info
-            }), 200
-
-        # --------------- DIRECTORY ---------------
-        if os.path.isdir(path):
-            files = []
+        for name in entries:
+            full_path = os.path.join(path, name)
 
             try:
-                entries = sorted(os.listdir(path))
+                st = os.stat(full_path)
+                is_dir = os.path.isdir(full_path)
+
+                files.append({
+                    "name": name,
+                    "path": full_path,
+                    "is_directory": is_dir,
+                    "size": None if is_dir else st.st_size,
+                    "mtime": datetime.utcfromtimestamp(
+                        st.st_mtime
+                    ).isoformat() + "Z",
+                })
             except PermissionError:
-                return jsonify({
-                    "status": "error",
-                    "message": "Permission denied"
-                }), 403
-
-            for name in entries:
-                full_path = os.path.join(path, name)
-
-                try:
-                    st = os.stat(full_path)
-                    is_dir = os.path.isdir(full_path)
-
-                    files.append({
-                        "name": name,
-                        "path": full_path,
-                        "is_directory": is_dir,
-                        "size": None if is_dir else st.st_size,
-                        "mtime": datetime.utcfromtimestamp(
-                            st.st_mtime
-                        ).isoformat() + "Z",
-                    })
-                except PermissionError:
-                    # Skip unreadable entries silently
-                    continue
-                except FileNotFoundError:
-                    # Race condition (deleted between list/stat)
-                    continue
-
-            return jsonify({
-                "status": "success",
-                "type": "directory",
-                "files": files
-            }), 200
+                # Skip unreadable entries silently
+                continue
+            except FileNotFoundError:
+                # Race condition (deleted between list/stat)
+                continue
 
         return jsonify({
-            "status": "error",
-            "message": f"Unknown filesystem object: {path}"
-        }), 400
+            "status": "success",
+            "type": "directory",
+            "files": files
+        }), 200
 
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
+    return jsonify({
+        "status": "error",
+        "message": f"Unknown filesystem object: {path}"
+    }), 400
+
+    # except Exception as e:
+    #     return jsonify({
+    #         "status": "error",
+    #         "message": str(e)
+    #     }), 500
 
 
 

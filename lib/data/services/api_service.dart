@@ -80,9 +80,17 @@ class ApiService {
       body: jsonEncode(body),
     );
 
-    if (response.statusCode != 200) return [];
+    AppLogger.info('ApiService: Response status=${response.statusCode}');
+
+    if (response.statusCode != 200) {
+      AppLogger.error(
+          'ApiService: Failed with status ${response.statusCode}: ${response.body}');
+      throw Exception('API returned ${response.statusCode}: ${response.body}');
+    }
 
     final data = jsonDecode(response.body);
+    AppLogger.info(
+        'ApiService: Response type=${data['type']}, fileCount=${(data['files'] as List?)?.length ?? 0}');
 
     if (data['type'] != 'directory') return [];
 

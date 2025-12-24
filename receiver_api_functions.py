@@ -9,6 +9,7 @@ from aioquic.asyncio import serve
 from aioquic.quic.configuration import QuicConfiguration
 from pki.store import PeerStore
 from pki.utils import fingerprint_pem, verify_cert_validity, get_peer_cert_pem_from_writer
+from path_security import validate_path_access, get_lanfxplorer_root
 
 
 OnFileReceivedCallback = Callable[[str, int], object]
@@ -89,6 +90,15 @@ async def _handle_stream(
                 marker, rest = filename.split("|", 1)
                 _, dest_path = marker.split(":", 1)
                 dest_dir_override = dest_path.rstrip("/")
+                
+                # SECURITY: Validate dest_dir_override is within allowed root
+                is_valid, error_msg = validate_path_access(dest_dir_override)
+                if not is_valid:
+                    print(f"[receiver] SECURITY: Rejected dest_dir_override: {error_msg}")
+                    writer.write(f"REJECTED:invalid_dest_dir".encode())
+                    await writer.drain()
+                    return
+                
                 filename = rest
                 print(f"[receiver] Destination directory override: {dest_dir_override}")
             except Exception:
@@ -187,7 +197,16 @@ async def _handle_stream(
             await writer.drain()
             return
 
-        base_dir = dest_dir_override if dest_dir_override else (save_dir or os.getcwd())
+        base_dir = dest_dir_override if dest_dir_override else (save_dir or get_lanfxplorer_root())
+        
+        # SECURITY: Final validation of base_dir
+        is_valid, error_msg = validate_path_access(base_dir)
+        if not is_valid:
+            print(f"[receiver] SECURITY: Rejected base_dir: {error_msg}")
+            writer.write(f"REJECTED:invalid_save_dir".encode())
+            await writer.drain()
+            return
+        
         if peer_fingerprint and not dest_dir_override:
             # Only add fingerprint subdirectory if no explicit destination was provided
             base_dir = os.path.join(base_dir, peer_fingerprint)

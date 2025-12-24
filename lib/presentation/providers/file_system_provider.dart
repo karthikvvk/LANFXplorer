@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:files/core/utils/logger.dart';
+import 'package:files/core/constants/path_security.dart';
 import 'package:files/data/models/file_item.dart';
 import 'package:files/data/services/api_service.dart';
 import 'package:flutter/foundation.dart';
@@ -52,18 +53,18 @@ class FileSystemProvider extends ChangeNotifier {
 
   /// Check if we're at the local root path (cannot navigate up further)
   bool get isAtLocalRoot {
-    if (_rootPath == null) return false;
+    // Use Lanfxplorer root as the minimum boundary
+    final lanfxRoot = getLanfxplorerRoot().replaceAll('\\', '/');
     final normalizedCurrent = _localCurrentPath.replaceAll('\\', '/');
-    final normalizedRoot = _rootPath!.replaceAll('\\', '/');
-    return normalizedCurrent == normalizedRoot;
+    return normalizedCurrent == lanfxRoot;
   }
 
   /// Check if we're at the remote root path
   bool get isAtRemoteRoot {
-    if (_rootPath == null) return false;
+    // Use Lanfxplorer root as the minimum boundary
+    final lanfxRoot = getLanfxplorerRoot().replaceAll('\\', '/');
     final normalizedCurrent = _remoteCurrentPath.replaceAll('\\', '/');
-    final normalizedRoot = _rootPath!.replaceAll('\\', '/');
-    return normalizedCurrent == normalizedRoot;
+    return normalizedCurrent == lanfxRoot;
   }
 
   Future<void> loadLocalFiles([String? path]) async {
