@@ -37,13 +37,15 @@ class _MainPageState extends State<MainPage> {
         AppLogger.info('MainPage: Root path set to: $rootPath');
       }
 
-      // Load files starting from root path
+      // Load local files starting from root path
       fileSystemProvider.loadLocalFiles(rootPath ?? ".");
 
       AppLogger.info('MainPage: Initializing. Destination IP: $destIp');
 
+      // Load remote files - pass null for path to let provider fetch remote's default path
+      // The file_system_provider will call /default_path endpoint to get the remote's Lanfxplorer root
       fileSystemProvider.loadRemoteFiles(
-        rootPath ?? ".",
+        null, // Let provider fetch remote default path
         destIp,
       );
     });

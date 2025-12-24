@@ -63,6 +63,40 @@ class ApiService {
     }
   }
 
+  /// Get the default path (Lanfxplorer root) from a peer.
+  /// If remoteHost is provided, fetches from that remote host,
+  /// otherwise returns local default path.
+  Future<String?> getDefaultPath({String? remoteHost}) async {
+    try {
+      AppLogger.network('Getting default path for ${remoteHost ?? "local"}');
+
+      final Map<String, dynamic> body = {};
+      if (remoteHost != null) {
+        body['remote_host'] = remoteHost;
+      }
+
+      final response = await _client
+          .post(
+            Uri.parse('${ApiEndpoints.baseUrl}${ApiEndpoints.defaultPath}'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final defaultPath = data['default_path'] as String?;
+        AppLogger.info('Got default path: $defaultPath');
+        return defaultPath;
+      }
+      AppLogger.error('Failed to get default path: ${response.statusCode}');
+      return null;
+    } catch (e, stack) {
+      AppLogger.error('Get default path error', error: e, stackTrace: stack);
+      return null;
+    }
+  }
+
   Future<List<FileItem>> getFiles(String path, {String? remoteHost}) async {
     final Map<String, dynamic> body = {'path': path};
     if (remoteHost != null) {

@@ -3,8 +3,9 @@ class ApiEndpoints {
 
   static const String scan = '/listhost';
   static const String connect = '/health';
-  static const String listDir = '/listdir'; // FIXED
+  static const String listDir = '/listdir';
   static const String transferSend = '/send_files';
   static const String transferFetch = '/receive_files';
   static const String reconnect = '/health';
+  static const String defaultPath = '/default_path';
 }

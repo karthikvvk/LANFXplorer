@@ -118,11 +118,33 @@ class FileSystemProvider extends ChangeNotifier {
     _remoteError = null; // Clear previous error
     notifyListeners();
 
-    if (path != null) {
-      // For remote, we use '.' as-is since the remote will resolve it
+    if (host != null) _remoteHost = host;
+
+    // If path is '.' or empty, fetch the remote's default path first
+    if (path == null || path == '.' || path == './' || path.isEmpty) {
+      if (_apiService != null && _remoteHost != null) {
+        try {
+          final defaultPath =
+              await _apiService.getDefaultPath(remoteHost: _remoteHost);
+          if (defaultPath != null && defaultPath.isNotEmpty) {
+            _remoteCurrentPath = defaultPath;
+            AppLogger.info('Remote default path resolved to: $defaultPath');
+          } else {
+            // Fallback to local Lanfxplorer path format
+            _remoteCurrentPath = getLanfxplorerRoot();
+            AppLogger.warning(
+                'Could not get remote default path, using local format');
+          }
+        } catch (e) {
+          AppLogger.error('Failed to get remote default path: $e');
+          _remoteCurrentPath = getLanfxplorerRoot();
+        }
+      } else if (path != null) {
+        _remoteCurrentPath = path;
+      }
+    } else {
       _remoteCurrentPath = path;
     }
-    if (host != null) _remoteHost = host;
 
     try {
       if (_apiService != null) {
@@ -131,7 +153,8 @@ class FileSystemProvider extends ChangeNotifier {
           remoteHost: _remoteHost,
         );
         // Update path from the first file's parent if available (to get absolute path)
-        if (_remoteFiles.isNotEmpty && _remoteCurrentPath == '.') {
+        if (_remoteFiles.isNotEmpty &&
+            (_remoteCurrentPath == '.' || _remoteCurrentPath == './')) {
           final firstPath = _remoteFiles.first.path;
           final parentDir = firstPath.substring(0, firstPath.lastIndexOf('/'));
           if (parentDir.isNotEmpty) {

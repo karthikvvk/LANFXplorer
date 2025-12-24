@@ -206,6 +206,59 @@ def osinfo():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/default_path", methods=["GET", "POST"])
+def default_path():
+    """
+    Return the default path (Lanfxplorer root) for this peer.
+    This allows remote peers to know where to start browsing files.
+    
+    Can also proxy to remote host if remote_host is provided in POST body.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        remote_host = data.get("remote_host")
+        
+        # If remote_host is provided, proxy the request
+        if remote_host:
+            env = load_env_vars()
+            my_ip = env.get("host")
+            
+            if remote_host != my_ip and remote_host != "127.0.0.1" and remote_host != "localhost":
+                print(f"[*] Proxying default_path request to {remote_host}")
+                try:
+                    resp = requests.get(
+                        f"http://{remote_host}:5000/default_path",
+                        timeout=10
+                    )
+                    if resp.status_code == 200:
+                        return jsonify(resp.json()), 200
+                    else:
+                        return jsonify({
+                            "status": "error",
+                            "message": f"Remote host returned {resp.status_code}"
+                        }), resp.status_code
+                except requests.exceptions.RequestException as e:
+                    return jsonify({
+                        "status": "error",
+                        "message": f"Failed to contact remote host: {str(e)}"
+                    }), 502
+        
+        # Return the Lanfxplorer root path
+        root = get_lanfxplorer_root()
+        
+        # Ensure directory exists
+        ensure_lanfxplorer_directory()
+        
+        return jsonify({
+            "status": "success",
+            "default_path": root
+        }), 200
+        
+    except Exception as e:
+        print(f"[!] Error getting default path: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route('/listdir', methods=['POST'])
 def list_directory():
     """
