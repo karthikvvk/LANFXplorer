@@ -6,6 +6,7 @@ import getpass
 from startsetup import load_env_vars
 from receiver_api_functions import start_receiver, stop_receiver
 from path_security import get_lanfxplorer_root, validate_path_access, ensure_lanfxplorer_directory
+from config_manager import get_password
 
 def on_file_received(filepath: str, filesize: int) -> None:
 
@@ -134,9 +135,10 @@ async def main() -> None:
         print(f"[receiver] Please run 'python startsetup.py' first to initialize certificates")
         sys.exit(1)
     
-    # Password is read on-demand by handshake service via os.environ.get("PASSWORD")
-    if not os.environ.get('PASSWORD'):
-        print(f"[receiver] WARNING: PASSWORD not set in environment. Set PASSWORD environment variable.")
+    # Password is loaded from secure keyring storage via config_manager
+    password = get_password()
+    if not password:
+        print(f"[receiver] WARNING: PASSWORD not set. Use config manager to set password.")
     else:
         print(f"[receiver] Password authentication enabled")
     

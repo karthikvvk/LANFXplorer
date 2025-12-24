@@ -18,6 +18,7 @@ from typing import Optional, Tuple
 
 from pki.utils import fingerprint_pem, verify_cert_validity
 from pki.store import PeerStore
+from config_manager import get_password
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ class HandshakeService:
         :param cert_path: Path to this peer's certificate
         :param ca_cert_path: Path to CA certificate for verification
         
-        Note: Password is read on-demand from os.environ.get("PASSWORD")
+        Note: Password is retrieved securely from config_manager (keyring)
         """
         self.host = host
         self.cert_path = cert_path
@@ -96,10 +97,10 @@ class HandshakeService:
             password_bytes = await reader.readexactly(password_len)
             password = password_bytes.decode('utf-8')
             
-            # Step 4: Validate password (read on-demand from environment)
-            expected_password = os.environ.get("PASSWORD")
+            # Step 4: Validate password (from secure keyring storage)
+            expected_password = get_password()
             if not expected_password:
-                logger.error(f"[Handshake] PASSWORD not set in environment")
+                logger.error(f"[Handshake] PASSWORD not configured in keyring")
                 writer.close()
                 await writer.wait_closed()
                 return
@@ -323,7 +324,7 @@ async def start_handshake_service(
     """
     Convenience function to start handshake service.
     
-    Note: Password is read on-demand from os.environ.get("PASSWORD")
+    Note: Password is retrieved securely from config_manager (keyring)
     
     :return: HandshakeService instance
     """

@@ -5,6 +5,7 @@ import platform
 import re, subprocess
 from dotenv import set_key, load_dotenv
 from path_security import get_lanfxplorer_root, ensure_lanfxplorer_directory
+from config_manager import get_config_manager
 
 pwd = os.getcwd()
 user = getpass.getuser()
@@ -170,6 +171,11 @@ def load_env_vars():
     # override=True ensures .env values override any existing environment variables
     load_dotenv(override=True)
     
+    # Load password from secure keyring storage
+    config_mgr = get_config_manager()
+    config_mgr.migrate_password_from_env()  # One-time migration
+    password = config_mgr.get_password()
+    
 
     pwd = os.getenv("PWD", os.getcwd())
     user = os.getenv("USER", getpass.getuser())
@@ -225,8 +231,7 @@ def load_env_vars():
         "dest_host": dest_host,
         "recivhost": reciv_host,
         "ca_cert": ca_cert,
-        # NOTE: PASSWORD is intentionally NOT loaded here
-        # It should be read on-demand via os.environ.get("PASSWORD") where needed
+        "password": password,  # Loaded from secure keyring
     }
 
 def write_env():
