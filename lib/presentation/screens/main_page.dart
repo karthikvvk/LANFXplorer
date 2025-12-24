@@ -26,17 +26,26 @@ class _MainPageState extends State<MainPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<FileSystemProvider>().loadLocalFiles(".");
-
       final envProvider = context.read<EnvProvider>();
+      final fileSystemProvider = context.read<FileSystemProvider>();
       final destIp = envProvider.env?.destHost;
+
+      // Set root path from outDir (the directory user selected on login)
+      final rootPath = envProvider.env?.outDir;
+      if (rootPath != null && rootPath.isNotEmpty) {
+        fileSystemProvider.setRootPath(rootPath);
+        AppLogger.info('MainPage: Root path set to: $rootPath');
+      }
+
+      // Load files starting from root path
+      fileSystemProvider.loadLocalFiles(rootPath ?? ".");
 
       AppLogger.info('MainPage: Initializing. Destination IP: $destIp');
 
-      context.read<FileSystemProvider>().loadRemoteFiles(
-            ".",
-            destIp,
-          );
+      fileSystemProvider.loadRemoteFiles(
+        rootPath ?? ".",
+        destIp,
+      );
     });
   }
 
@@ -107,7 +116,35 @@ class _MainPageState extends State<MainPage> {
 
   void _onHome() {
     context.read<SessionProvider>().endSession();
-    context.go('/');
+    context.go('/home');
+  }
+
+  void _onLogout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sign Out'),
+        content: const Text('Are you sure you want to sign out?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Sign Out'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      await context.read<EnvProvider>().logout();
+      context.read<SessionProvider>().endSession();
+      if (mounted) {
+        context.go('/');
+      }
+    }
   }
 
   void _onReconnect() async {
@@ -215,6 +252,13 @@ class _MainPageState extends State<MainPage> {
                   label: 'Home',
                   onPressed: _onHome,
                 ),
+                const SizedBox(width: AppSpacing.xs),
+                _ToolbarButton(
+                  icon: Icons.logout,
+                  label: 'Sign Out',
+                  onPressed: _onLogout,
+                  isDestructive: true,
+                ),
                 const SizedBox(width: AppSpacing.sm),
                 const ThemeToggleButton(),
               ],
@@ -271,27 +315,33 @@ class _ToolbarButton extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onPressed;
+  final bool isDestructive;
 
   const _ToolbarButton({
     required this.icon,
     required this.label,
     required this.onPressed,
+    this.isDestructive = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final buttonColor = isDestructive ? colorScheme.error : colorScheme.primary;
 
     return OutlinedButton.icon(
       onPressed: onPressed,
-      icon: Icon(icon, size: 18, color: colorScheme.primary),
-      label: Text(label, style: TextStyle(color: colorScheme.primary)),
+      icon: Icon(icon, size: 18, color: buttonColor),
+      label: Text(label, style: TextStyle(color: buttonColor)),
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.md,
           vertical: AppSpacing.sm,
         ),
-        side: BorderSide(color: colorScheme.outline.withValues(alpha: 0.3)),
+        side: BorderSide(
+            color: isDestructive
+                ? colorScheme.error.withValues(alpha: 0.5)
+                : colorScheme.outline.withValues(alpha: 0.3)),
       ),
     );
   }
@@ -452,10 +502,15 @@ class _FileExplorerPane extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: AppSpacing.sm),
-                // Breadcrumb path
+                // Navigation up button - hide when at root
                 Row(
                   children: [
-                    if (currentPath != '/')
+                    // Only show back button if not at root
+                    if (!(isLocal
+                            ? fileSystemProvider.isAtLocalRoot
+                            : fileSystemProvider.isAtRemoteRoot) &&
+                        currentPath != '/' &&
+                        currentPath != '.')
                       IconButton(
                         icon: const Icon(Icons.arrow_back, size: 18),
                         onPressed: () {
@@ -471,12 +526,19 @@ class _FileExplorerPane extends StatelessWidget {
                       ),
                     const SizedBox(width: AppSpacing.xs),
                     Expanded(
-                      child: Text(
-                        currentPath,
-                        style: context.textStyles.bodySmall?.withColor(
-                          colorScheme.onSurfaceVariant,
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: _BreadcrumbPath(
+                          path: currentPath,
+                          isLocal: isLocal,
+                          onSegmentTap: (path) {
+                            if (isLocal) {
+                              fileSystemProvider.loadLocalFiles(path);
+                            } else {
+                              fileSystemProvider.loadRemoteFiles(path);
+                            }
+                          },
                         ),
-                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],
@@ -551,6 +613,117 @@ class _FileExplorerPane extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Clickable breadcrumb path widget that displays path segments as clickable buttons
+class _BreadcrumbPath extends StatelessWidget {
+  final String path;
+  final bool isLocal;
+  final void Function(String path) onSegmentTap;
+
+  const _BreadcrumbPath({
+    required this.path,
+    required this.isLocal,
+    required this.onSegmentTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    // Split path into segments
+    final normalizedPath = path.replaceAll('\\', '/');
+    final segments =
+        normalizedPath.split('/').where((s) => s.isNotEmpty).toList();
+
+    // Handle root path
+    final isAbsolute = normalizedPath.startsWith('/');
+
+    if (segments.isEmpty) {
+      return InkWell(
+        onTap: () => onSegmentTap('/'),
+        borderRadius: BorderRadius.circular(4),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          child: Text(
+            '/',
+            style: context.textStyles.bodySmall?.copyWith(
+              color: colorScheme.primary,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      );
+    }
+
+    final List<Widget> widgets = [];
+
+    // Add root if absolute path
+    if (isAbsolute) {
+      widgets.add(
+        InkWell(
+          onTap: () => onSegmentTap('/'),
+          borderRadius: BorderRadius.circular(4),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            child: Text(
+              '/',
+              style: context.textStyles.bodySmall?.copyWith(
+                color: colorScheme.primary,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Add each segment
+    for (int i = 0; i < segments.length; i++) {
+      final segment = segments[i];
+      final isLast = i == segments.length - 1;
+
+      // Build path up to this segment
+      final pathToSegment = isAbsolute
+          ? '/${segments.sublist(0, i + 1).join('/')}'
+          : segments.sublist(0, i + 1).join('/');
+
+      // Add separator if not first (and not after root)
+      if (i > 0 || isAbsolute) {
+        widgets.add(
+          Icon(
+            Icons.chevron_right,
+            size: 16,
+            color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+          ),
+        );
+      }
+
+      // Add segment button
+      widgets.add(
+        InkWell(
+          onTap: isLast ? null : () => onSegmentTap(pathToSegment),
+          borderRadius: BorderRadius.circular(4),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            child: Text(
+              segment,
+              style: context.textStyles.bodySmall?.copyWith(
+                color:
+                    isLast ? colorScheme.onSurfaceVariant : colorScheme.primary,
+                fontWeight: isLast ? FontWeight.w500 : FontWeight.normal,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: widgets,
     );
   }
 }

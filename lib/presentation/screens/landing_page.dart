@@ -66,6 +66,35 @@ class _LandingPageState extends State<LandingPage> {
     }
   }
 
+  void _logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sign Out'),
+        content: const Text(
+            'Are you sure you want to sign out? You will need to enter your credentials again.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Sign Out'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      await context.read<EnvProvider>().logout();
+      context.read<SessionProvider>().endSession();
+      if (mounted) {
+        context.go('/');
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -119,6 +148,12 @@ class _LandingPageState extends State<LandingPage> {
                   onPressed: networkProvider.isScanning ? null : _scanNetwork,
                   tooltip: 'Refresh Network Scan',
                   color: colorScheme.primary,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.logout),
+                  onPressed: _logout,
+                  tooltip: 'Sign Out',
+                  color: colorScheme.error,
                 ),
                 const ThemeToggleButton(),
               ],

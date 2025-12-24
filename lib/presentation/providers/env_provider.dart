@@ -13,10 +13,22 @@ class EnvProvider extends ChangeNotifier {
   AppEnv? get env => _env;
   bool get isLoaded => _env != null;
 
+  /// Check if user has valid credentials stored
+  /// Returns true if PASSWORD is set and non-empty
+  bool get hasCredentials {
+    if (_env == null) return false;
+    // Check if we've loaded and password exists
+    // Note: We check via EnvLoader since password isn't in AppEnv model
+    return _hasStoredPassword;
+  }
+
+  bool _hasStoredPassword = false;
+
   Future<void> load() async {
     if (_env != null) return;
 
     _env = await EnvLoader.load();
+    _hasStoredPassword = await EnvLoader.hasPassword();
     notifyListeners();
   }
 
@@ -24,6 +36,7 @@ class EnvProvider extends ChangeNotifier {
   /// Useful after login page updates the .env
   Future<void> forceReload() async {
     _env = await EnvLoader.load();
+    _hasStoredPassword = await EnvLoader.hasPassword();
     notifyListeners();
   }
 
@@ -51,5 +64,13 @@ class EnvProvider extends ChangeNotifier {
     notifyListeners();
 
     await EnvWriter.setValue('OUTDIR', outDir);
+  }
+
+  /// Logout user by clearing PASSWORD from .env
+  /// This will redirect user to login on next app start
+  Future<void> logout() async {
+    await EnvWriter.removeValue('PASSWORD');
+    _hasStoredPassword = false;
+    notifyListeners();
   }
 }

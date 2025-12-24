@@ -24,12 +24,30 @@ class _LoginPageState extends State<LoginPage> {
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   bool _isLoading = false;
+  bool _isCheckingCredentials = true;
 
   @override
   void initState() {
     super.initState();
     // Set default directory to Downloads
     _defaultDirController.text = _getDefaultDownloadsPath();
+
+    // Check if already logged in and redirect to home
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkExistingCredentials();
+    });
+  }
+
+  Future<void> _checkExistingCredentials() async {
+    final envProvider = context.read<EnvProvider>();
+    await envProvider.load();
+
+    if (envProvider.hasCredentials && mounted) {
+      // User has already logged in before, go directly to home
+      context.go('/home');
+    } else {
+      setState(() => _isCheckingCredentials = false);
+    }
   }
 
   String _getDefaultDownloadsPath() {
@@ -136,6 +154,22 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+
+    // Show loading while checking for existing credentials
+    if (_isCheckingCredentials) {
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.folder_shared, size: 72, color: colorScheme.primary),
+              const SizedBox(height: AppSpacing.md),
+              const CircularProgressIndicator(),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       body: Center(

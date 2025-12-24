@@ -16,10 +16,14 @@ class FileSystemProvider extends ChangeNotifier {
   bool _isLoadingLocal = false;
   bool _isLoadingRemote = false;
 
+  // Root path restriction - set from outDir in environment
+  String? _rootPath;
+
   List<FileItem> get localFiles => _localFiles;
   List<FileItem> get remoteFiles => _remoteFiles;
   String get localCurrentPath => _localCurrentPath;
   String get remoteCurrentPath => _remoteCurrentPath;
+  String? get rootPath => _rootPath;
   bool get isLoadingLocal => _isLoadingLocal;
   bool get isLoadingRemote => _isLoadingRemote;
 
@@ -27,6 +31,32 @@ class FileSystemProvider extends ChangeNotifier {
       _localFiles.where((f) => f.isSelected).toList();
   List<FileItem> get selectedRemoteFiles =>
       _remoteFiles.where((f) => f.isSelected).toList();
+
+  /// Set the root path for path restrictions
+  void setRootPath(String path) {
+    _rootPath = path;
+    // Initialize local path to root if not set or if it's the default
+    if (_localCurrentPath == '.' || _localCurrentPath == './') {
+      _localCurrentPath = path;
+    }
+    notifyListeners();
+  }
+
+  /// Check if we're at the local root path (cannot navigate up further)
+  bool get isAtLocalRoot {
+    if (_rootPath == null) return false;
+    final normalizedCurrent = _localCurrentPath.replaceAll('\\', '/');
+    final normalizedRoot = _rootPath!.replaceAll('\\', '/');
+    return normalizedCurrent == normalizedRoot;
+  }
+
+  /// Check if we're at the remote root path
+  bool get isAtRemoteRoot {
+    if (_rootPath == null) return false;
+    final normalizedCurrent = _remoteCurrentPath.replaceAll('\\', '/');
+    final normalizedRoot = _rootPath!.replaceAll('\\', '/');
+    return normalizedCurrent == normalizedRoot;
+  }
 
   Future<void> loadLocalFiles([String? path]) async {
     _isLoadingLocal = true;
@@ -152,6 +182,8 @@ class FileSystemProvider extends ChangeNotifier {
   }
 
   void navigateLocalUp() {
+    // Check if at root boundary - cannot navigate up
+    if (isAtLocalRoot) return;
     if (_localCurrentPath == '/') return;
 
     final dir = Directory(_localCurrentPath).parent;
@@ -160,6 +192,8 @@ class FileSystemProvider extends ChangeNotifier {
   }
 
   void navigateRemoteUp() {
+    // Check if at root boundary - cannot navigate up
+    if (isAtRemoteRoot) return;
     if (_remoteCurrentPath != '/') {
       final parts = _remoteCurrentPath.split('/');
       parts.removeLast();

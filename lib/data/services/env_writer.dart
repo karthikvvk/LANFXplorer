@@ -42,4 +42,37 @@ class EnvWriter {
       flush: true,
     );
   }
+
+  /// Remove a key from .env file
+  static Future<void> removeValue(String key) async {
+    final file = File('.env');
+
+    if (!file.existsSync()) {
+      return; // Nothing to remove
+    }
+
+    final lines = await file.readAsLines();
+
+    final newLines = lines.where((line) {
+      final trimmed = line.trim();
+
+      if (trimmed.isEmpty || trimmed.startsWith('#')) {
+        return true; // Keep comments and empty lines
+      }
+
+      final idx = line.indexOf('=');
+      if (idx == -1) {
+        return true;
+      }
+
+      final k = line.substring(0, idx).trim();
+      return k != key; // Filter out the key we want to remove
+    }).toList();
+
+    await file.writeAsString(
+      newLines.join('\n'),
+      mode: FileMode.write,
+      flush: true,
+    );
+  }
 }

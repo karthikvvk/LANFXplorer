@@ -26,7 +26,80 @@ import time
 from threading import Lock
 from wifi_speed import estimate_transfer_time_seconds, get_wifi_speed
 
+# ==================== PATH RESTRICTION HELPERS ====================
+def get_root_path():
+    """Get the configured root path from environment (OUTDIR)."""
+    env = load_env_vars()
+    root_path = env.get("out_dir") or env.get("src_dir") or env.get("pwd", os.getcwd())
+    return os.path.normpath(os.path.abspath(root_path))
+
+
+def is_path_at_minimum_depth(path: str) -> bool:
+    """
+    Check if path is at minimum required depth.
+    Paths at /home/user level or above are NOT allowed.
+    Must be at least /home/user/something (3 levels deep).
+    
+    Examples:
+        /home/user          -> False (too shallow)
+        /home/user/Downloads -> True (ok)
+        /home               -> False (too shallow)
+        /                   -> False (too shallow)
+    """
+    normalized = os.path.normpath(os.path.abspath(path))
+    parts = [p for p in normalized.split(os.sep) if p]
+    
+    # Must have at least 3 parts: e.g., ['home', 'user', 'something']
+    # This ensures we're below /home/user level
+    return len(parts) >= 3
+
+
+def is_path_within_root(requested_path: str, root_path: str) -> bool:
+    """
+    Check if requested_path is within or equal to root_path.
+    Handles path traversal attempts like '../'.
+    
+    Args:
+        requested_path: The path being requested
+        root_path: The allowed root directory
+        
+    Returns:
+        True if requested_path is within root_path, False otherwise
+    """
+    # Normalize and get absolute paths
+    requested_abs = os.path.normpath(os.path.abspath(requested_path))
+    root_abs = os.path.normpath(os.path.abspath(root_path))
+    
+    # Check if requested path starts with root path
+    # We add os.sep to prevent /home/user/test matching /home/user/testing
+    if requested_abs == root_abs:
+        return True
+    return requested_abs.startswith(root_abs + os.sep)
+
+
+def validate_path_access(path: str) -> tuple:
+    """
+    Validate that a path is accessible under the current restrictions.
+    
+    Returns:
+        (is_valid, error_message) tuple
+    """
+    root_path = get_root_path()
+    
+    # First check: Is the ROOT_PATH itself at a safe depth?
+    if not is_path_at_minimum_depth(root_path):
+        return False, f"Root path '{root_path}' is too shallow. Must be below /home/user level."
+    
+    # Second check: Is the requested path within the root?
+    if not is_path_within_root(path, root_path):
+        return False, f"Access denied: Path '{path}' is outside allowed directory '{root_path}'"
+    
+    return True, ""
+
+# ==================================================================
+
 _transfer_tasks = {}  # task_id -> {status, progress, total_size, transferred, files, error, start_time, estimated_duration}
+
 _transfer_lock = Lock()
 
 # Cache WiFi speed (detect once at startup or first transfer)
@@ -239,11 +312,22 @@ def list_directory():
 
         path = os.path.normpath(path)
 
+        # ========== PATH RESTRICTION CHECK ==========
+        is_valid, error_msg = validate_path_access(path)
+        if not is_valid:
+            print(f"[!] Path access denied: {error_msg}")
+            return jsonify({
+                "status": "error",
+                "message": error_msg
+            }), 403
+        # =============================================
+
         if not os.path.exists(path):
             return jsonify({
                 "status": "error",
                 "message": f"Path does not exist: {path}"
             }), 404
+
 
         # ---------------- FILE ----------------
         if os.path.isfile(path):
@@ -346,7 +430,20 @@ def send_files():
     if not valid_files:
         return jsonify({"status": "error", "message": "no valid files to send", "missing": missing}), 400
 
+    # ========== PATH RESTRICTION CHECK ==========
+    # Validate all files are within the allowed root path
+    for f in valid_files:
+        is_valid, error_msg = validate_path_access(f)
+        if not is_valid:
+            print(f"[!] Send files access denied: {error_msg}")
+            return jsonify({
+                "status": "error",
+                "message": error_msg
+            }), 403
+    # =============================================
+
     # Create task for tracking
+
     task_id = _create_transfer_task(valid_files, remote_host, "send")
     
     def _do_send_background():
