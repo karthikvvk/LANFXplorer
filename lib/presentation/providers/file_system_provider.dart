@@ -1,8 +1,8 @@
 import 'dart:io';
-import 'package:files/core/utils/logger.dart';
-import 'package:files/core/constants/path_security.dart';
-import 'package:files/data/models/file_item.dart';
-import 'package:files/data/services/api_service.dart';
+import 'package:lanfxplorer/core/utils/logger.dart';
+import 'package:lanfxplorer/core/constants/path_security.dart';
+import 'package:lanfxplorer/data/models/file_item.dart';
+import 'package:lanfxplorer/data/services/api_service.dart';
 import 'package:flutter/foundation.dart';
 
 class FileSystemProvider extends ChangeNotifier {

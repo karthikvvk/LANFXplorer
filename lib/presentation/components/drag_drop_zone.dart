@@ -1,5 +1,5 @@
 import 'package:desktop_drop/desktop_drop.dart';
-import 'package:files/theme.dart';
+import 'package:lanfxplorer/theme.dart';
 import 'package:flutter/material.dart';
 
 class DragDropZone extends StatefulWidget {

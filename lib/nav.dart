@@ -1,6 +1,6 @@
-import 'package:files/presentation/screens/landing_page.dart';
-import 'package:files/presentation/screens/login_page.dart';
-import 'package:files/presentation/screens/main_page.dart';
+import 'package:lanfxplorer/presentation/screens/landing_page.dart';
+import 'package:lanfxplorer/presentation/screens/login_page.dart';
+import 'package:lanfxplorer/presentation/screens/main_page.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 

@@ -1,8 +1,8 @@
 import 'dart:convert';
-import 'package:files/core/constants/api_endpoints.dart';
-import 'package:files/core/utils/logger.dart';
-import 'package:files/data/models/file_item.dart';
-import 'package:files/data/models/machine.dart';
+import 'package:lanfxplorer/core/constants/api_endpoints.dart';
+import 'package:lanfxplorer/core/utils/logger.dart';
+import 'package:lanfxplorer/data/models/file_item.dart';
+import 'package:lanfxplorer/data/models/machine.dart';
 import 'package:http/http.dart' as http;
 
 class ApiService {

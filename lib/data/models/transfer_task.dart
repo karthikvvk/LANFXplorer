@@ -1,4 +1,4 @@
-import 'package:files/core/constants/enums.dart';
+import 'package:lanfxplorer/core/constants/enums.dart';
 
 class TransferTask {
   final String id;
@@ -24,34 +24,37 @@ class TransferTask {
   });
 
   factory TransferTask.fromJson(Map<String, dynamic> json) => TransferTask(
-    id: json['id'] ?? '',
-    files: List<String>.from(json['files'] ?? []),
-    destinationMachine: json['destination_machine'] ?? '',
-    direction: TransferDirection.values.firstWhere(
-      (e) => e.name == json['direction'],
-      orElse: () => TransferDirection.send,
-    ),
-    status: TransferStatus.values.firstWhere(
-      (e) => e.name == json['status'],
-      orElse: () => TransferStatus.pending,
-    ),
-    progress: (json['progress'] ?? 0).toDouble(),
-    createdAt: DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
-    completedAt: json['completed_at'] != null ? DateTime.tryParse(json['completed_at']) : null,
-    errorMessage: json['error_message'],
-  );
+        id: json['id'] ?? '',
+        files: List<String>.from(json['files'] ?? []),
+        destinationMachine: json['destination_machine'] ?? '',
+        direction: TransferDirection.values.firstWhere(
+          (e) => e.name == json['direction'],
+          orElse: () => TransferDirection.send,
+        ),
+        status: TransferStatus.values.firstWhere(
+          (e) => e.name == json['status'],
+          orElse: () => TransferStatus.pending,
+        ),
+        progress: (json['progress'] ?? 0).toDouble(),
+        createdAt:
+            DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
+        completedAt: json['completed_at'] != null
+            ? DateTime.tryParse(json['completed_at'])
+            : null,
+        errorMessage: json['error_message'],
+      );
 
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'files': files,
-    'destination_machine': destinationMachine,
-    'direction': direction.name,
-    'status': status.name,
-    'progress': progress,
-    'created_at': createdAt.toIso8601String(),
-    'completed_at': completedAt?.toIso8601String(),
-    'error_message': errorMessage,
-  };
+        'id': id,
+        'files': files,
+        'destination_machine': destinationMachine,
+        'direction': direction.name,
+        'status': status.name,
+        'progress': progress,
+        'created_at': createdAt.toIso8601String(),
+        'completed_at': completedAt?.toIso8601String(),
+        'error_message': errorMessage,
+      };
 
   TransferTask copyWith({
     String? id,
@@ -77,7 +80,9 @@ class TransferTask {
     );
   }
 
-  String get directionText => direction == TransferDirection.send ? 'Sending' : 'Receiving';
+  String get directionText =>
+      direction == TransferDirection.send ? 'Sending' : 'Receiving';
 
-  String get displayName => files.isNotEmpty ? files.first.split('/').last : 'Unknown';
+  String get displayName =>
+      files.isNotEmpty ? files.first.split('/').last : 'Unknown';
 }

@@ -1,5 +1,5 @@
-import 'package:files/data/models/machine.dart';
-import 'package:files/data/services/api_service.dart';
+import 'package:lanfxplorer/data/models/machine.dart';
+import 'package:lanfxplorer/data/services/api_service.dart';
 import 'package:flutter/material.dart';
 
 class SessionProvider extends ChangeNotifier {

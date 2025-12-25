@@ -1,10 +1,10 @@
-import 'package:files/data/services/api_service.dart';
-import 'package:files/presentation/providers/env_provider.dart';
-import 'package:files/presentation/providers/file_system_provider.dart';
-import 'package:files/presentation/providers/network_provider.dart';
-import 'package:files/presentation/providers/session_provider.dart';
-import 'package:files/presentation/providers/theme_provider.dart';
-import 'package:files/presentation/providers/transfer_provider.dart';
+import 'package:lanfxplorer/data/services/api_service.dart';
+import 'package:lanfxplorer/presentation/providers/env_provider.dart';
+import 'package:lanfxplorer/presentation/providers/file_system_provider.dart';
+import 'package:lanfxplorer/presentation/providers/network_provider.dart';
+import 'package:lanfxplorer/presentation/providers/session_provider.dart';
+import 'package:lanfxplorer/presentation/providers/theme_provider.dart';
+import 'package:lanfxplorer/presentation/providers/transfer_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'theme.dart';

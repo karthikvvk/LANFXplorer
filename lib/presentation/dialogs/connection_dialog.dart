@@ -1,6 +1,6 @@
-import 'package:files/data/models/machine.dart';
-import 'package:files/data/services/api_service.dart';
-import 'package:files/theme.dart';
+import 'package:lanfxplorer/data/models/machine.dart';
+import 'package:lanfxplorer/data/services/api_service.dart';
+import 'package:lanfxplorer/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 

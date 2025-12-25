@@ -1,6 +1,6 @@
-import 'package:files/core/utils/logger.dart';
-import 'package:files/data/models/machine.dart';
-import 'package:files/data/services/api_service.dart';
+import 'package:lanfxplorer/core/utils/logger.dart';
+import 'package:lanfxplorer/data/models/machine.dart';
+import 'package:lanfxplorer/data/services/api_service.dart';
 import 'package:flutter/foundation.dart';
 
 class NetworkProvider extends ChangeNotifier {

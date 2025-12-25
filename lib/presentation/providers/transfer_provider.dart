@@ -1,8 +1,8 @@
-import 'package:files/core/constants/enums.dart';
-import 'package:files/core/utils/logger.dart';
-import 'package:files/data/models/file_item.dart';
-import 'package:files/data/models/transfer_task.dart';
-import 'package:files/data/services/api_service.dart';
+import 'package:lanfxplorer/core/constants/enums.dart';
+import 'package:lanfxplorer/core/utils/logger.dart';
+import 'package:lanfxplorer/data/models/file_item.dart';
+import 'package:lanfxplorer/data/models/transfer_task.dart';
+import 'package:lanfxplorer/data/services/api_service.dart';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 

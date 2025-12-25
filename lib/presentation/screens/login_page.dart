@@ -1,6 +1,6 @@
-import 'package:files/presentation/providers/env_provider.dart';
-import 'package:files/theme.dart';
-import 'package:files/core/constants/path_security.dart';
+import 'package:lanfxplorer/presentation/providers/env_provider.dart';
+import 'package:lanfxplorer/theme.dart';
+import 'package:lanfxplorer/core/constants/path_security.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';

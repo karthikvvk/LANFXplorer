@@ -1,5 +1,5 @@
-import 'package:files/data/models/file_item.dart';
-import 'package:files/theme.dart';
+import 'package:lanfxplorer/data/models/file_item.dart';
+import 'package:lanfxplorer/theme.dart';
 import 'package:flutter/material.dart';
 
 class FileItemCard extends StatefulWidget {

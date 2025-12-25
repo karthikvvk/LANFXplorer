@@ -1,7 +1,7 @@
-import 'package:files/core/constants/enums.dart';
-import 'package:files/data/models/transfer_task.dart';
-import 'package:files/presentation/providers/transfer_provider.dart';
-import 'package:files/theme.dart';
+import 'package:lanfxplorer/core/constants/enums.dart';
+import 'package:lanfxplorer/data/models/transfer_task.dart';
+import 'package:lanfxplorer/presentation/providers/transfer_provider.dart';
+import 'package:lanfxplorer/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
@@ -61,10 +61,7 @@ class TransferStatusWidget extends StatelessWidget {
             ...activeTasks.map((task) => _TransferTaskItem(task: task)),
           ],
         ),
-      )
-        .animate()
-        .fadeIn(duration: 300.ms)
-        .slideY(begin: 0.2, end: 0),
+      ).animate().fadeIn(duration: 300.ms).slideY(begin: 0.2, end: 0),
     );
   }
 }

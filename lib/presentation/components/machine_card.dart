@@ -1,5 +1,5 @@
-import 'package:files/data/models/machine.dart';
-import 'package:files/theme.dart';
+import 'package:lanfxplorer/data/models/machine.dart';
+import 'package:lanfxplorer/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 
@@ -73,9 +73,8 @@ class _MachineCardState extends State<MachineCard> {
                     width: 8,
                     height: 8,
                     decoration: BoxDecoration(
-                      color: widget.machine.isOnline
-                          ? Colors.green
-                          : Colors.grey,
+                      color:
+                          widget.machine.isOnline ? Colors.green : Colors.grey,
                       shape: BoxShape.circle,
                     ),
                   )
