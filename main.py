@@ -9,6 +9,7 @@ Orchestrates the complete application startup in order:
 4. api_bridge.py - Flask API (background)  
 5. flutter run - Flutter UI
 """
+from startsetup import write_env
 import os
 import sys
 import subprocess
@@ -115,8 +116,13 @@ def main():
         # Step 1: Run installer in sync thread (handles firewall with sudo)
         # =================================================================
         print_header("Step 1: Installation & Setup")
-        if not run_installer_sync():
-            print_status("warn", "Installation had some issues, continuing anyway...")
+        if os.getenv("installer"):
+            o = run_installer_sync()
+            if not o:
+                print_status("warn", "Installation had some issues, continuing anyway...")
+            write_env(installer=False)
+        else:
+            print_status("warn", "Installation not enabled, continuing...")
         
         # =================================================================
         # Step 2: Run startsetup.py (PKI and environment)
@@ -157,7 +163,7 @@ def main():
         print_status("run", "Launching Flutter application...")
         
         flutter_proc = subprocess.Popen(
-            ["flutter", "run", "-d", "linux"],
+            ["flutter", "run", "--release"],
             cwd=str(APP_DIR),
         )
         processes.append(("Flutter", flutter_proc))

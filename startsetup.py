@@ -234,7 +234,7 @@ def load_env_vars():
         "password": password,  # Loaded from secure keyring
     }
 
-def write_env():
+def write_env(installer=False):
     global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
     detect_interface()
     ls = os.listdir(pwd)
