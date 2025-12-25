@@ -1,13 +1,13 @@
-streamlit
+aioquic
 paramiko
 requests
 flask
-dotenv
+python-dotenv
 elevate
 scapy
-ipaddress
 ownca
 cryptography
 pyOpenSSL
 service-identity
 bcrypt
+keyring

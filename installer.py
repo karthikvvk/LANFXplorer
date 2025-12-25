@@ -511,7 +511,7 @@ class RequirementsInstaller:
 
     def __init__(self):
         self.requirements_file = APP_DIR / "requirements.txt"
-        self.old_requirements_file = APP_DIR / "requirement.txtt"
+        # self.old_requirements_file = APP_DIR / "requirement.txtt"
 
     def create_requirements_file(self):
         """Create a proper requirements.txt file."""
