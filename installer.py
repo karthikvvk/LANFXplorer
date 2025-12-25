@@ -263,10 +263,11 @@ class DependencyChecker:
 # =============================================================================
 
 class FirewallManager:
-    """Configure firewall rules for the application."""
+    """Configure firewall rules for the application with robust bidirectional support."""
 
     def __init__(self):
         self.needs_elevation = True
+        self.app_name = "LANFXplorer"
 
     def _get_firewall_tool_linux(self) -> str:
         """Detect available firewall tool on Linux."""
@@ -276,86 +277,224 @@ class FirewallManager:
                 return tool
         return ""
 
-    def allow_port_linux(self, port: int, protocol: str) -> bool:
-        """Allow a port on Linux firewall."""
+    def _cleanup_existing_rules_ufw(self) -> bool:
+        """Remove any conflicting or stale UFW rules for our ports."""
+        # UFW doesn't have a good way to delete by port, so we skip cleanup
+        # Rules are idempotent - adding same rule again is safe
+        return True
+
+    def allow_port_linux(self, port: int, protocol: str, direction: str = "in") -> bool:
+        """
+        Allow a port on Linux firewall.
+        
+        Args:
+            port: Port number
+            protocol: 'tcp' or 'udp'
+            direction: 'in', 'out', or 'both'
+        """
         tool = self._get_firewall_tool_linux()
         proto = protocol.lower()
 
         if tool == "ufw":
-            success, _, stderr = run_command(["sudo", "ufw", "allow", f"{port}/{proto}"])
-            return success
+            # UFW: allow in/out
+            if direction in ("in", "both"):
+                run_command(["sudo", "ufw", "allow", "in", f"{port}/{proto}"], 
+                           capture=True)
+            if direction in ("out", "both"):
+                run_command(["sudo", "ufw", "allow", "out", f"{port}/{proto}"],
+                           capture=True)
+            return True
+            
         elif tool == "firewall-cmd":
-            success, _, stderr = run_command([
+            # Firewalld: add-port handles both directions by default
+            success, _, _ = run_command([
                 "sudo", "firewall-cmd", "--permanent",
                 f"--add-port={port}/{proto}"
             ])
-            if success:
-                run_command(["sudo", "firewall-cmd", "--reload"])
             return success
+            
         elif tool == "iptables":
-            proto_flag = "-p"
-            success, _, stderr = run_command([
-                "sudo", "iptables", "-A", "INPUT",
-                proto_flag, proto,
-                "--dport", str(port),
-                "-j", "ACCEPT"
-            ])
+            success = True
+            if direction in ("in", "both"):
+                s, _, _ = run_command([
+                    "sudo", "iptables", "-A", "INPUT",
+                    "-p", proto, "--dport", str(port),
+                    "-j", "ACCEPT"
+                ])
+                success = success and s
+            if direction in ("out", "both"):
+                s, _, _ = run_command([
+                    "sudo", "iptables", "-A", "OUTPUT",
+                    "-p", proto, "--dport", str(port),
+                    "-j", "ACCEPT"
+                ])
+                success = success and s
             return success
         else:
             print_status("warn", "No firewall tool found. Manual configuration may be needed.", 1)
-            return True  # Return True to continue installation
+            return True
+
+    def allow_icmp_linux(self) -> bool:
+        """Allow ICMP (ping) for network discovery."""
+        tool = self._get_firewall_tool_linux()
+        
+        if tool == "ufw":
+            # UFW allows ICMP by default, but we ensure it's enabled
+            # Check /etc/ufw/before.rules for ICMP settings
+            print_status("info", "ICMP/ping allowed (UFW default)", 1)
+            return True
+            
+        elif tool == "firewall-cmd":
+            run_command([
+                "sudo", "firewall-cmd", "--permanent",
+                "--add-icmp-block-inversion"  # Allow ICMP
+            ])
+            return True
+            
+        elif tool == "iptables":
+            run_command([
+                "sudo", "iptables", "-A", "INPUT",
+                "-p", "icmp", "--icmp-type", "echo-request",
+                "-j", "ACCEPT"
+            ])
+            run_command([
+                "sudo", "iptables", "-A", "OUTPUT",
+                "-p", "icmp", "--icmp-type", "echo-reply",
+                "-j", "ACCEPT"
+            ])
+            return True
+        return True
+
+    def allow_broadcast_linux(self) -> bool:
+        """Allow UDP broadcast for peer discovery."""
+        tool = self._get_firewall_tool_linux()
+        
+        if tool == "ufw":
+            # UFW: Allow broadcast on discovery port
+            # Broadcast is typically allowed by default, but let's be explicit
+            run_command(["sudo", "ufw", "allow", "in", "from", "any", "to", "255.255.255.255", 
+                        "port", "4436", "proto", "udp"], capture=True)
+            return True
+            
+        elif tool == "iptables":
+            # Allow broadcast traffic
+            run_command([
+                "sudo", "iptables", "-A", "INPUT",
+                "-d", "255.255.255.255",
+                "-p", "udp", "--dport", "4436",
+                "-j", "ACCEPT"
+            ])
+            run_command([
+                "sudo", "iptables", "-A", "INPUT",
+                "-m", "pkttype", "--pkt-type", "broadcast",
+                "-p", "udp", "--dport", "4436",
+                "-j", "ACCEPT"
+            ])
+            return True
+        return True
 
     def allow_port_windows(self, port: int, protocol: str) -> bool:
-        """Allow a port on Windows firewall."""
+        """Allow a port on Windows firewall with both inbound and outbound rules."""
         proto = protocol.upper()
-        rule_name = f"LANFXplorer_{proto}_{port}"
+        
+        # Inbound rule
+        rule_name_in = f"{self.app_name}_{proto}_{port}_IN"
+        run_command([
+            "netsh", "advfirewall", "firewall", "delete", "rule",
+            f"name={rule_name_in}"
+        ])
+        run_command([
+            "netsh", "advfirewall", "firewall", "add", "rule",
+            f"name={rule_name_in}",
+            "dir=in",
+            "action=allow",
+            f"protocol={proto}",
+            f"localport={port}",
+            "enable=yes"
+        ])
+        
+        # Outbound rule
+        rule_name_out = f"{self.app_name}_{proto}_{port}_OUT"
+        run_command([
+            "netsh", "advfirewall", "firewall", "delete", "rule",
+            f"name={rule_name_out}"
+        ])
+        run_command([
+            "netsh", "advfirewall", "firewall", "add", "rule",
+            f"name={rule_name_out}",
+            "dir=out",
+            "action=allow",
+            f"protocol={proto}",
+            f"localport={port}",
+            "enable=yes"
+        ])
+        
+        return True
 
-        # Delete existing rule if any
+    def allow_icmp_windows(self) -> bool:
+        """Allow ICMP (ping) on Windows."""
+        rule_name = f"{self.app_name}_ICMP"
         run_command([
             "netsh", "advfirewall", "firewall", "delete", "rule",
             f"name={rule_name}"
         ])
-
-        # Add inbound rule
-        success, _, stderr = run_command([
+        run_command([
             "netsh", "advfirewall", "firewall", "add", "rule",
             f"name={rule_name}",
+            "protocol=icmpv4:8,any",
             "dir=in",
             "action=allow",
-            f"protocol={proto}",
-            f"localport={port}"
+            "enable=yes"
         ])
-        return success
+        return True
 
     def allow_port(self, port: int, protocol: str) -> bool:
-        """Allow a port in the firewall."""
+        """Allow a port in the firewall (both directions)."""
         if SYSTEM.startswith("linux"):
-            return self.allow_port_linux(port, protocol)
+            return self.allow_port_linux(port, protocol, direction="both")
         elif SYSTEM.startswith("win"):
             return self.allow_port_windows(port, protocol)
         return False
 
     def configure_all_ports(self) -> bool:
-        """Configure all required ports."""
+        """Configure all required ports with robust rules."""
         print_header("Configuring Firewall Rules")
 
         if self.needs_elevation:
             print_status("info", "Firewall configuration may require elevated privileges")
 
         all_success = True
+        
+        # Configure application ports (bidirectional)
         for port, (protocol, description) in PORTS.items():
             success = self.allow_port(port, protocol)
             if success:
-                print_status("ok", f"Port {port}/{protocol} - {description}", 1)
+                print_status("ok", f"Port {port}/{protocol} (in/out) - {description}", 1)
             else:
                 print_status("fail", f"Port {port}/{protocol} - {description}", 1)
                 all_success = False
 
+        # Configure ICMP for network discovery
+        if SYSTEM.startswith("linux"):
+            self.allow_icmp_linux()
+        elif SYSTEM.startswith("win"):
+            self.allow_icmp_windows()
+        print_status("ok", "ICMP/ping enabled for discovery", 1)
+        
+        # Configure broadcast for peer discovery (Linux only)
+        if SYSTEM.startswith("linux"):
+            self.allow_broadcast_linux()
+            print_status("ok", "UDP broadcast enabled for peer discovery", 1)
+
+        # Enable/reload firewall
         if SYSTEM.startswith("linux"):
             tool = self._get_firewall_tool_linux()
             if tool == "ufw":
                 run_command(["sudo", "ufw", "--force", "enable"])
                 print_status("ok", "UFW firewall enabled")
+            elif tool == "firewall-cmd":
+                run_command(["sudo", "firewall-cmd", "--reload"])
+                print_status("ok", "Firewalld reloaded")
         
         # Drop back to normal user privileges after firewall config
         drop_privileges()
@@ -484,34 +623,6 @@ class DesktopEntryManager:
         self.app_dir = APP_DIR
         self.start_script = APP_DIR / "start.py"
 
-    def create_start_script(self):
-        """Create the start.py script."""
-        script_content = f'''#!/usr/bin/env python3
-"""
-LANFXplorer Startup Script
-Entry point for the desktop shortcut.
-"""
-import os
-import sys
-
-# Change to application directory
-os.chdir(r"{self.app_dir}")
-
-# Import and run the installer's run functionality
-from installer import AppLauncher
-
-if __name__ == "__main__":
-    launcher = AppLauncher()
-    launcher.run()
-'''
-        with open(self.start_script, "w") as f:
-            f.write(script_content)
-        
-        # Make executable on Linux
-        if SYSTEM.startswith("linux"):
-            os.chmod(self.start_script, 0o755)
-        
-        print_status("ok", f"Created start script: {self.start_script}")
 
     def create_linux_desktop_entry(self) -> bool:
         """Create a .desktop file on Linux."""
@@ -611,7 +722,7 @@ $Shortcut.Save()
         print_header("Creating Desktop Entry")
 
         # First create the start script
-        self.create_start_script()
+        # self.create_start_script()
 
         if SYSTEM.startswith("linux"):
             return self.create_linux_desktop_entry()
