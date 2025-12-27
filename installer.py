@@ -1,16 +1,3 @@
-#!/usr/bin/env python3
-"""
-LANFXplorer Installer
-
-Cross-platform installer that handles:
-1. System dependency checks (OpenSSL, Python)
-2. Firewall configuration for all required ports
-3. Python requirements installation
-4. Directory structure setup
-5. Desktop entry creation (Linux/Windows)
-6. Application startup orchestration
-"""
-
 import os
 import sys
 import platform

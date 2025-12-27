@@ -8,12 +8,15 @@ dump/
 *.key
 .vscode/
 .agent/
+appbuild/
 ./pkica_export/
 # Miscellaneous
 *.class
 *.log
+opt/
 *.pyc
 *.swp
+*.tar*
 .DS_Store
 .atom/
 *.peers_key
