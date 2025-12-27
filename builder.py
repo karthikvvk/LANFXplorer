@@ -3,12 +3,21 @@
 import os
 import shutil
 import tarfile
+import platform
 
 ROOT = os.getcwd()
 APPBUILD = os.path.join(ROOT, "appbuild")
+SYSTEM = platform.system().lower()
+
+# Detect OS and build accordingly
 try:
     os.system("flutter")
-    os.system("flutter clean && flutter pub get && flutter build linux --release")
+    if SYSTEM.startswith("win"):
+        print("[*] Building for Windows...")
+        os.system("flutter clean && flutter pub get && flutter build windows --release")
+    else:
+        print("[*] Building for Linux...")
+        os.system("flutter clean && flutter pub get && flutter build linux --release")
 except:
     print("flutter not found")
 # Files and directories to include
@@ -18,6 +27,7 @@ ITEMS = [
     "api_bridge.py",
     "pubspec.lock",
     "app.sh",
+    "app.bat",  # Windows launcher
     "pubspec.yaml",
     "receiver_api_functions.py",
     "config_manager.py",
@@ -31,6 +41,7 @@ ITEMS = [
     "installer.py",
     "sender_api_functions.py",
     "install.sh",
+    "install.bat",  # Windows installer
     "send.py",
     "lanfxplorery.png",
     "startsetup.py",
@@ -39,7 +50,11 @@ ITEMS = [
     "path_security.py",
 ]
 
-FLUTTER_BUNDLE_SRC = "/build/linux/x64/release/bundle"
+# Set Flutter bundle source based on OS
+if SYSTEM.startswith("win"):
+    FLUTTER_BUNDLE_SRC = "\\build\\windows\\runner\\Release"
+else:
+    FLUTTER_BUNDLE_SRC = "/build/linux/x64/release/bundle"
 
 
 def get_version_from_pubspec():
