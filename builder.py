@@ -28,7 +28,7 @@ ITEMS = [
     "sender_api_functions.py",
     "install.sh",
     "send.py",
-    "lanfxplorery.jpg",
+    "lanfxplorery.png",
     "startsetup.py",
     "main.py",
     "wifi_speed.py",
