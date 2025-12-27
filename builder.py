@@ -6,7 +6,11 @@ import tarfile
 
 ROOT = os.getcwd()
 APPBUILD = os.path.join(ROOT, "appbuild")
-# os.system("flutter clean && flutter pub get && flutter build linux --release")
+try:
+    os.system("flutter")
+    os.system("flutter clean && flutter pub get && flutter build linux --release")
+except:
+    print("flutter not found")
 # Files and directories to include
 ITEMS = [
     "analysis_options.yaml",
