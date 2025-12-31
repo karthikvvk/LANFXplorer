@@ -36,13 +36,9 @@ async def main() -> None:
     else:
         out_dir = ensure_lanfxplorer_directory()
 
-    if not os.path.isfile(cert_path):
-        print(f"[receiver] ERROR: certificate file not found: {cert_path}")
-        sys.exit(1)
-
-    if not os.path.isfile(key_path):
-        print(f"[receiver] ERROR: key file not found: {key_path}")
-        sys.exit(1)
+    # NOTE: Certificate (cert.pem) may not exist on first run - it will be generated
+    # during CA discovery below. Key will also be generated if missing.
+    # We only check these paths exist AFTER CA discovery completes.
 
     out_dir = os.path.abspath(out_dir)
     os.makedirs(out_dir, exist_ok=True)
@@ -119,6 +115,19 @@ async def main() -> None:
             
             print("[receiver] ✓ Configured as network CA")
             print(f"[receiver] CA will be advertised at {ca_ip}")
+
+    # === Post-CA-Discovery Validation ===
+    # Now verify that certificates were properly generated
+    if not os.path.isfile(cert_path):
+        print(f"[receiver] ERROR: Certificate generation failed - {cert_path} not found")
+        print(f"[receiver] CA discovery did not produce a valid certificate.")
+        sys.exit(1)
+    
+    if not os.path.isfile(key_path):
+        print(f"[receiver] ERROR: Key file not found: {key_path}")
+        sys.exit(1)
+    
+    print(f"[receiver] ✓ Certificates validated: {cert_path}, {key_path}")
 
     from scanner import start_peer_discovery_listener
     peer_listener = await start_peer_discovery_listener(ca_ip)

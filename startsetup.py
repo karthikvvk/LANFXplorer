@@ -262,8 +262,8 @@ def write_env(installer=False):
         "KEY": key,
         "DEST_HOST": dest_host,
         "RECIVHOST": reciv_host,
-        "CA_CERT": os.path.join(pwd, "ca_cert.pem")
-
+        "CA_CERT": os.path.join(pwd, "ca_cert.pem"),
+        "INSTALLER": "true" if installer else "false",
     }
 
     env_file = ".env"
@@ -317,65 +317,52 @@ def setup_pki_and_write_env():
     ca_mgr = CAManager(host_ip, pwd)
     
 
-    async def run_discovery_flow():
-        await ca_mgr.start_discovery()
-        
-
-        print("    Broadcasting 'WHO_IS_CA'...")
-        try:
-            await asyncio.wait_for(ca_mgr.ca_found_event.wait(), timeout=5.0)
-            print(f"    [+] Found CA at {ca_mgr.ca_info}")
-            
-
-            print("    Requesting certificate signature...")
-            client_cert, ca_cert = await ca_mgr.get_signed_cert(priv_key_pem, f"{user}@{host_ip}")
-            
-            with open(cert_file, "wb") as f:
-                f.write(client_cert)
-            with open(ca_cert_file, "wb") as f:
-                f.write(ca_cert)
-            print("    [+] Received signed certificate & CA cert.")
-            
-        except asyncio.TimeoutError:
-            print("    [-] No CA found. Becoming Root CA...")
-            await ca_mgr.become_ca()
-            
-            pass
-
     async def run_setup_logic():
-
-        transport, _ = await asyncio.get_running_loop().create_datagram_endpoint(
-             lambda: asyncio.DatagramProtocol(), local_addr=('0.0.0.0', 0)) # random port to specific port? 
-
-           
-           
-        await ca_mgr.start_discovery()
-        print("    Broadcasting 'WHO_IS_CA'...")
+        """Run CA discovery and certificate setup logic."""
         try:
-            await asyncio.wait_for(ca_mgr.ca_found_event.wait(), timeout=5.0)
-            print(f"    [+] Found CA at {ca_mgr.ca_info}")
-            client_cert, ca_cert = await ca_mgr.get_signed_cert(priv_key_pem, f"{user}@{host_ip}")
-            with open(cert_file, "wb") as f: f.write(client_cert)
-            with open(ca_cert_file, "wb") as f: f.write(ca_cert)
-            ca_mgr.stop_discovery()
+            # Only start discovery if not already started by a previous call
+            if not ca_mgr.discovery_transport:
+                await ca_mgr.start_discovery()
+            print("    Broadcasting 'WHO_IS_CA'...")
             
-        except asyncio.TimeoutError:
-            print("    [-] No CA found. Configuring as CA...")
-
-            from pki import utils
-           
-           
-            ca_cert_pem, ca_key_pem = await ca_mgr.become_ca() 
-            
-            client_cert = utils.sign_csr(
-                utils.generate_csr(priv_key_pem, f"{user}@{host_ip}", san_ips=[host_ip]),
-                ca_cert_pem,
-                ca_key_pem
-            )
-            with open(cert_file, "wb") as f: f.write(client_cert)
+            try:
+                await asyncio.wait_for(ca_mgr.ca_found_event.wait(), timeout=5.0)
+                print(f"    [+] Found CA at {ca_mgr.ca_info}")
+                client_cert, ca_cert = await ca_mgr.get_signed_cert(priv_key_pem, f"{user}@{host_ip}")
+                with open(cert_file, "wb") as f: 
+                    f.write(client_cert)
+                with open(ca_cert_file, "wb") as f: 
+                    f.write(ca_cert)
+                print("    [+] Received signed certificate & CA cert.")
+                
+            except asyncio.TimeoutError:
+                print("    [-] No CA found. Configuring as CA...")
+                from pki import utils
+                
+                ca_cert_pem, ca_key_pem = await ca_mgr.become_ca() 
+                
+                client_cert = utils.sign_csr(
+                    utils.generate_csr(priv_key_pem, f"{user}@{host_ip}", san_ips=[host_ip]),
+                    ca_cert_pem,
+                    ca_key_pem
+                )
+                with open(cert_file, "wb") as f: 
+                    f.write(client_cert)
+                print("    [+] Generated self-signed certificate.")
+                
+        finally:
+            # Always stop discovery to clean up resources
+            if ca_mgr.discovery_transport:
+                ca_mgr.stop_discovery()
     
-    asyncio.run(run_setup_logic())
+    try:
+        asyncio.run(run_setup_logic())
+        print("[+] PKI setup completed successfully")
+    except Exception as e:
+        print(f"[!] PKI setup encountered an error: {e}")
+        print("[!] Continuing with existing certificates...")
     
+    # Always write env vars, even if PKI setup fails
     write_env()
 
 if __name__ == "__main__":

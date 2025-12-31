@@ -122,4 +122,13 @@ EOF
 chmod +x "$DESKTOP_FILE"
 touch "$APP_DIR/.installed"
 
+# ===============================
+# Mark installation as complete
+# ===============================
+if grep -q "^INSTALLER=" "$ENV_FILE"; then
+  sed -i "s/^INSTALLER=.*/INSTALLER='true'/" "$ENV_FILE"
+else
+  echo "INSTALLER='true'" >> "$ENV_FILE"
+fi
+
 echo "[✓] Installation complete"

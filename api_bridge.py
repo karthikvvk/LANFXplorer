@@ -5,7 +5,7 @@ import json
 import requests
 from startsetup import *
 from scanner import *
-from flask_cors import CORS
+# from flask_cors import CORS
 import platform
 import getpass
 import asyncio  
@@ -25,7 +25,7 @@ app = Flask(__name__)
 
 CHUNK_SIZE = 64 * 1024
 ENV_FILE = ".env"
-CORS(app, resources={r"/*": {"origins":"*"}})
+# CORS(app, resources={r"/*": {"origins":"*"}})
 
 # Transfer task registry for progress tracking
 import uuid
