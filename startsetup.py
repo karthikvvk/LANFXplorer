@@ -307,18 +307,19 @@ def setup_pki_and_write_env():
                 format=serialization.PrivateFormat.TraditionalOpenSSL,
                 encryption_algorithm=serialization.NoEncryption()
             ))
-    
     with open(key_file, "rb") as f:
         priv_key_pem = f.read()
 
 
     detect_interface()
     get_network_info()
-    ca_mgr = CAManager(host_ip, pwd)
     
 
     async def run_setup_logic():
         """Run CA discovery and certificate setup logic."""
+        # Create CAManager inside async context to ensure asyncio.Event is created in the right loop
+        ca_mgr = CAManager(host_ip, pwd)
+        
         try:
             # Only start discovery if not already started by a previous call
             if not ca_mgr.discovery_transport:
