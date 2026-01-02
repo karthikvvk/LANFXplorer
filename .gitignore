@@ -16,7 +16,6 @@ appbuild/
 opt/
 *.pyc
 *.swp
-*.tar*
 .DS_Store
 .atom/
 *.peers_key
