@@ -4,11 +4,12 @@ import os
 import shutil
 import tarfile
 import platform
+import datetime
 
 ROOT = os.getcwd()
 APPBUILD = os.path.join(ROOT, "appbuild")
 SYSTEM = platform.system().lower()
-
+date = datetime.datetime.now().strftime("%Y-%m-%d")
 # Detect OS and build accordingly
 try:
     os.system("flutter")
@@ -91,7 +92,7 @@ def main():
 
     # Read version
     version = get_version_from_pubspec()
-    archive_name = f"{SYSTEM}_{version}.tar.gz"
+    archive_name = f"{SYSTEM}_{date}_{version}.tar.gz"
 
     # Create tar.gz
     with tarfile.open(archive_name, "w:gz") as tar:
