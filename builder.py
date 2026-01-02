@@ -81,10 +81,11 @@ def main():
         else:
             shutil.copy2(src, dst)
 
-    # Copy flutter bundle
+    # Copy flutter bundle - maintain full directory structure
+    bundle_dest = os.path.join(APPBUILD, "build", "linux", "x64", "release", "bundle")
     shutil.copytree(
         ROOT + FLUTTER_BUNDLE_SRC,
-        os.path.join(APPBUILD, "bundle"),
+        bundle_dest,
         dirs_exist_ok=True,
     )
 
