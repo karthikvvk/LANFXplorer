@@ -91,7 +91,7 @@ def main():
 
     # Read version
     version = get_version_from_pubspec()
-    archive_name = f"{version}.tar.gz"
+    archive_name = f"{SYSTEM}_{version}.tar.gz"
 
     # Create tar.gz
     with tarfile.open(archive_name, "w:gz") as tar:
