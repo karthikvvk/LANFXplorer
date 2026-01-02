@@ -3,6 +3,7 @@
 import os
 import shutil
 import tarfile
+import zipfile
 import platform
 import datetime
 
@@ -51,11 +52,13 @@ ITEMS = [
     "path_security.py",
 ]
 
-# Set Flutter bundle source based on OS
+# Set Flutter bundle source and executable name based on OS
 if SYSTEM.startswith("win"):
     FLUTTER_BUNDLE_SRC = "\\build\\windows\\runner\\Release"
+    EXECUTABLE_NAME = "lanfxplorer.exe"
 else:
     FLUTTER_BUNDLE_SRC = "/build/linux/x64/release/bundle"
+    EXECUTABLE_NAME = "lanfxplorer"
 
 
 def get_version_from_pubspec():
@@ -90,15 +93,35 @@ def main():
         dirs_exist_ok=True,
     )
 
+    # Copy built executable to root directory for easy trial runs
+    executable_src = os.path.join(ROOT + FLUTTER_BUNDLE_SRC, EXECUTABLE_NAME)
+    executable_dst = os.path.join(ROOT, EXECUTABLE_NAME)
+    if os.path.exists(executable_src):
+        shutil.copy2(executable_src, executable_dst)
+        print(f"[*] Copied {EXECUTABLE_NAME} to root directory for easy testing")
+    else:
+        print(f"[!] Warning: Executable not found at {executable_src}")
+
     # Read version
     version = get_version_from_pubspec()
-    archive_name = f"{SYSTEM}_{date}_{version}.tar.gz"
-
-    # Create tar.gz
-    with tarfile.open(archive_name, "w:gz") as tar:
-        tar.add(APPBUILD, arcname="appbuild")
-
-    print(f"Created archive: {archive_name}")
+    
+    # Create archive based on OS
+    if SYSTEM.startswith("win"):
+        # Create zip for Windows
+        archive_name = f"{SYSTEM}_{date}_{version}.zip"
+        with zipfile.ZipFile(archive_name, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(APPBUILD):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.join("appbuild", os.path.relpath(file_path, APPBUILD))
+                    zipf.write(file_path, arcname)
+        print(f"[*] Created archive: {archive_name}")
+    else:
+        # Create tar.gz for Linux
+        archive_name = f"{SYSTEM}_{date}_{version}.tar.gz"
+        with tarfile.open(archive_name, "w:gz") as tar:
+            tar.add(APPBUILD, arcname="appbuild")
+        print(f"[*] Created archive: {archive_name}")
 
 
 if __name__ == "__main__":
