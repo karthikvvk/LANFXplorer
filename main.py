@@ -57,11 +57,12 @@ def run_script(script_name: str, wait: bool = True):
 
 def run_ui():
 
-    ui_path = "/home/muruga/workspace/quic_explorer/LANFXplorer/build/linux/x64/release/bundle/lanfxplorer"#APP_DIR / "bundle" / "lanfxplorer"
-    # if not os.path.exists(ui_path):
-    #     print_status("fail", f"UI executable not found: {ui_path}")
-    #     return None
-    # print_status("run", "Starting LANFXplorer UI")
+    ui_path = APP_DIR / "bundle" / "lanfxplorer"
+    # ui_path = "/home/muruga/Documents/LANFXplorer/build/linux/x64/debug/bundle/lanfxplorer"
+    if not os.path.exists(ui_path):
+        print_status("fail", f"UI executable not found: {ui_path}")
+        return None
+    print_status("run", "Starting LANFXplorer UI")
     return subprocess.Popen([str(ui_path)], cwd=str(APP_DIR))
 
 
