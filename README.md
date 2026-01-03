@@ -46,19 +46,13 @@ LANFXplorer is a cross-platform application that enables fast and secure file tr
    ```bash
    ./install.sh
    ```
-   Or manually:
-   ```bash
-   python3 installer.py
-   ```
+
 
 3. **Launch the application**:
    ```bash
    ./app.sh
    ```
-   Or:
-   ```bash
-   python3 main.py
-   ```
+
 
 #### Windows
 
@@ -67,19 +61,13 @@ LANFXplorer is a cross-platform application that enables fast and secure file tr
    ```cmd
    install.bat
    ```
-   Or:
-   ```cmd
-   python installer.py
-   ```
+
 
 3. **Launch the application**:
    ```cmd
    app.bat
    ```
-   Or:
-   ```cmd
-   python main.py
-   ```
+
 ---
 
 ### Getting Started
