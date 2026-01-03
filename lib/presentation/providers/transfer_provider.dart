@@ -150,17 +150,78 @@ class TransferProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final ok =
+      // Initiate the fetch - this asks the remote to send files to us
+      // Returns immediately with the remote's task_id
+      final result =
           await _apiService.fetchFiles(sourceId, paths, destDir: destDir);
 
-      _updateTask(
-        taskId,
-        ok ? TransferStatus.completed : TransferStatus.failed,
-        ok ? 1.0 : 0.0,
-        errorMessage: ok ? null : 'Failed to fetch files',
-      );
+      AppLogger.info(
+          'fetchFiles result: taskId=${result?.taskId}, status=${result?.status}');
 
-      return ok;
+      if (result == null) {
+        AppLogger.error('fetchFiles returned null result');
+        _updateTask(taskId, TransferStatus.failed, 0.0,
+            errorMessage: 'Failed to initiate fetch');
+        return false;
+      }
+
+      final backendTaskId = result.taskId;
+
+      // Validate taskId
+      if (backendTaskId.isEmpty) {
+        AppLogger.error('Backend returned empty task_id');
+        _updateTask(taskId, TransferStatus.failed, 0.0,
+            errorMessage: 'Server returned invalid task ID');
+        return false;
+      }
+
+      // Poll for progress - same logic as sendFiles
+      int pollAttempts = 0;
+      const maxPollAttempts = 600; // 5 minutes max
+      int pollIntervalMs = 500; // Start with 500ms, adjust after first poll
+
+      while (pollAttempts < maxPollAttempts) {
+        // First poll is immediate (no delay), then use calculated interval
+        if (pollAttempts > 0) {
+          await Future.delayed(Duration(milliseconds: pollIntervalMs));
+        }
+        pollAttempts++;
+
+        final status = await _apiService.getTransferStatus(backendTaskId);
+        if (status == null) {
+          // Polling failed, wait and retry
+          if (pollAttempts > 10) {
+            AppLogger.warning('Polling failed, retrying...');
+          }
+          await Future.delayed(const Duration(milliseconds: 500));
+          continue;
+        }
+
+        // On first successful poll, adjust interval based on file size
+        if (pollAttempts == 1 && status.totalSize > 0) {
+          final sizeMb = status.totalSize / (1024 * 1024);
+          pollIntervalMs = (sizeMb * 100).clamp(500, 2000).toInt();
+          AppLogger.info(
+              'Poll interval set to ${pollIntervalMs}ms for ${sizeMb.toStringAsFixed(1)}MB file');
+        }
+
+        // Update local task with progress
+        _updateTask(taskId, TransferStatus.inProgress, status.progress);
+
+        if (status.isCompleted) {
+          _updateTask(taskId, TransferStatus.completed, 1.0);
+          return true;
+        } else if (status.isFailed) {
+          _updateTask(taskId, TransferStatus.failed, status.progress,
+              errorMessage: status.error ?? 'Transfer failed');
+          return false;
+        }
+      }
+
+      // Timeout after max attempts
+      _updateTask(taskId, TransferStatus.failed, 0.0,
+          errorMessage: 'Transfer timed out');
+      return false;
     } catch (e, s) {
       AppLogger.error('Fetch task error', error: e, stackTrace: s);
       _updateTask(taskId, TransferStatus.failed, 0.0,

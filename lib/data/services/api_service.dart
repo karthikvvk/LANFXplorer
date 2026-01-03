@@ -184,7 +184,7 @@ class ApiService {
       final response = await _client.get(
         Uri.parse('${ApiEndpoints.baseUrl}/transfer_status/$taskId'),
         headers: {'Accept': 'application/json'},
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 300));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -197,7 +197,11 @@ class ApiService {
     }
   }
 
-  Future<bool> fetchFiles(String remoteHost, List<String> filePaths,
+  /// Initiates a file fetch (receive) and returns the remote task ID for progress tracking.
+  /// This asks the remote host to send files to us.
+  /// Returns null if the request failed.
+  /// [destDir] is the local directory where files should be saved.
+  Future<SendResult?> fetchFiles(String remoteHost, List<String> filePaths,
       {String? destDir}) async {
     try {
       AppLogger.transfer(
@@ -217,10 +221,23 @@ class ApiService {
           )
           .timeout(const Duration(seconds: 60));
 
-      return response.statusCode == 200;
+      if (response.statusCode == 200) {
+        // The response contains the remote task info
+        final data = jsonDecode(response.body);
+        final remoteResponse = data['remote_response'] as Map<String, dynamic>?;
+        if (remoteResponse != null) {
+          return SendResult(
+            taskId: remoteResponse['task_id'] ?? '',
+            status: remoteResponse['status'] ?? 'unknown',
+            files: List<String>.from(remoteResponse['files'] ?? filePaths),
+          );
+        }
+      }
+      AppLogger.error('Fetch files failed: ${response.statusCode}');
+      return null;
     } catch (e, stack) {
       AppLogger.error('Fetch files error', error: e, stackTrace: stack);
-      return false;
+      return null;
     }
   }
 
