@@ -41,8 +41,9 @@ LANFXplorer is a cross-platform application that enables fast and secure file tr
 
 #### Linux
 
-1. **Download** the latest release or build from source
-2. **Run the installer**:
+1. **Download** the latest release **Archive** from this repository linux_YYYY-MM-DD_1.0.x.tar.gz(linux)
+2. **Extract the Archive**
+3. **Run the installer**:
    ```bash
    ./install.sh
    ```
@@ -56,8 +57,9 @@ LANFXplorer is a cross-platform application that enables fast and secure file tr
 
 #### Windows
 
-1. **Download** the latest release
-2. **Run the installer**:
+1. **Download** the latest release **Archive** from this repository windows_YYYY-MM-DD_1.0.x.zip(windows)
+2. **Extract the Archive**
+3. **Run the installer**:
    ```cmd
    install.bat
    ```
