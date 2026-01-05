@@ -41,7 +41,7 @@ LANFXplorer is a cross-platform application that enables fast and secure file tr
 
 #### Linux
 
-1. **Download** the latest release **Archive** from this [**linux-Installer**](https://github.com/karthikvvk/LANFXplorer/blob/main/linux_2026-01-05_1.0.0%2B1.tar.gz)
+1. **Download** the latest release **Archive** from this [**linux-Installer**](https://github.com/karthikvvk/LANFXplorer/raw/refs/heads/main/linux_2026-01-05_1.0.0+1.tar.gz)
 2. **Extract the Archive**
 3. **Run the installer**:
    ```bash
