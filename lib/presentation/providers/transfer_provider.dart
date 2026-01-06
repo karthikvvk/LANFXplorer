@@ -1,20 +1,52 @@
+import 'dart:convert';
 import 'package:lanfxplorer/core/constants/enums.dart';
 import 'package:lanfxplorer/core/utils/logger.dart';
 import 'package:lanfxplorer/data/models/file_item.dart';
 import 'package:lanfxplorer/data/models/transfer_task.dart';
 import 'package:lanfxplorer/data/services/api_service.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 class TransferProvider extends ChangeNotifier {
   final ApiService _apiService;
+  static const String _tasksKey = 'transfer_history';
+  static const int _maxHistorySize = 50;
 
   final List<TransferTask> _tasks = [];
   final _uuid = const Uuid();
 
-  TransferProvider(
-    this._apiService,
-  );
+  TransferProvider(this._apiService) {
+    _loadHistory();
+  }
+
+  Future<void> _loadHistory() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final json = prefs.getString(_tasksKey);
+      if (json != null) {
+        final List<dynamic> decoded = jsonDecode(json);
+        _tasks.addAll(decoded.map((e) => TransferTask.fromJson(e)));
+        notifyListeners();
+      }
+    } catch (e) {
+      AppLogger.error('Failed to load transfer history', error: e);
+    }
+  }
+
+  Future<void> _saveHistory() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      // Keep only the most recent tasks
+      while (_tasks.length > _maxHistorySize) {
+        _tasks.removeAt(0);
+      }
+      final json = jsonEncode(_tasks.map((t) => t.toJson()).toList());
+      await prefs.setString(_tasksKey, json);
+    } catch (e) {
+      AppLogger.error('Failed to save transfer history', error: e);
+    }
+  }
 
   List<TransferTask> get tasks => List.unmodifiable(_tasks);
 
@@ -250,6 +282,7 @@ class TransferProvider extends ChangeNotifier {
           : null,
     );
     notifyListeners();
+    _saveHistory();
   }
 
   void clearCompleted() {
@@ -258,10 +291,12 @@ class TransferProvider extends ChangeNotifier {
         t.status == TransferStatus.failed ||
         t.status == TransferStatus.cancelled);
     notifyListeners();
+    _saveHistory();
   }
 
   void clearAll() {
     _tasks.clear();
     notifyListeners();
+    _saveHistory();
   }
 }

@@ -215,19 +215,62 @@ class FileSystemProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void addExternalFilesToLocal(List<String> filePaths) {
-    for (final path in filePaths) {
-      final name = path.split('/').last;
-      final file = FileItem(
-        name: name,
-        path: path,
-        isDirectory: false,
-        modified: DateTime.now(),
-      );
-      _localFiles.add(file);
+  Future<void> addExternalFilesToLocal(List<String> filePaths) async {
+    int copiedCount = 0;
+    for (final sourcePath in filePaths) {
+      try {
+        final name = sourcePath.split('/').last;
+        final destPath = '$_localCurrentPath/$name';
+        final isDir = FileSystemEntity.isDirectorySync(sourcePath);
+
+        if (isDir) {
+          // Copy directory recursively
+          await _copyDirectory(Directory(sourcePath), Directory(destPath));
+        } else {
+          // Copy file
+          await File(sourcePath).copy(destPath);
+        }
+
+        // Get file info for the copied file
+        int? fileSize;
+        if (!isDir) {
+          try {
+            fileSize = File(destPath).lengthSync();
+          } catch (_) {}
+        }
+
+        final file = FileItem(
+          name: name,
+          path: destPath,
+          isDirectory: isDir,
+          size: fileSize,
+          modified: DateTime.now(),
+          isSelected: true, // Auto-select for immediate transfer
+        );
+        _localFiles.add(file);
+        copiedCount++;
+        AppLogger.info('Copied $sourcePath to $destPath');
+      } catch (e) {
+        AppLogger.error('Failed to copy $sourcePath: $e');
+      }
     }
     notifyListeners();
-    AppLogger.info('Added ${filePaths.length} external files to local');
+    AppLogger.info('Copied $copiedCount external files to $_localCurrentPath');
+  }
+
+  /// Recursively copy a directory
+  Future<void> _copyDirectory(Directory source, Directory destination) async {
+    if (!await destination.exists()) {
+      await destination.create(recursive: true);
+    }
+    await for (final entity in source.list(recursive: false)) {
+      final newPath = '${destination.path}/${entity.path.split('/').last}';
+      if (entity is File) {
+        await entity.copy(newPath);
+      } else if (entity is Directory) {
+        await _copyDirectory(entity, Directory(newPath));
+      }
+    }
   }
 
   void navigateLocalUp() {
