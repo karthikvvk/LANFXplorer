@@ -4,18 +4,25 @@ import socket
 import logging
 import json
 import os
+import sys
+from pathlib import Path
 from typing import Optional, Tuple
+
+# Add parent directory to path for app_config import
+_pki_dir = Path(__file__).parent.resolve()
+sys.path.insert(0, str(_pki_dir.parent))
 
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 
 from pki import utils
+from app_config import AppConfig
 
-# Constants
-DISCOVERY_PORT = 4434
-SIGNING_PORT = 4435
-DISCOVERY_MSG = b"WHO_IS_CA"
-CA_RESPONSE_PREFIX = b"I_AM_CA"
+# Use centralized constants from AppConfig
+DISCOVERY_PORT = AppConfig.CA_DISCOVERY_PORT
+SIGNING_PORT = AppConfig.CA_SIGNING_PORT
+DISCOVERY_MSG = AppConfig.CA_DISCOVERY_MSG
+CA_RESPONSE_PREFIX = AppConfig.CA_RESPONSE_PREFIX
 
 logger = logging.getLogger(__name__)
 

@@ -11,22 +11,21 @@ from dotenv import load_dotenv, set_key
 APP_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(APP_DIR))
 
-# Now import local modules
-from startsetup import *
+# Now import local modules - use explicit imports instead of wildcard
+from app_config import get_config
 
 st.set_page_config(page_title="Select Host", layout="centered")
 
-env = load_env_vars()
-host_ip, user, certi, sys, interface, outdir, srcdir, port = (
-    env["host"],
-    env["user"],
-    env["certi"],
-    env["system"],
-    env["interface"],
-    env["out_dir"],
-    env["src"],
-    env["port"],
-)
+# Use AppConfig for centralized configuration (avoids overwriting sys module)
+config = get_config()
+host_ip = config.host
+user = config.user
+certi = config.certi
+system_type = config.system_type
+interface = config.interface
+outdir = config.out_dir
+srcdir = config.src_dir
+port = config.port
 
 BACKEND = f"http://{host_ip}:5000"
 
@@ -42,7 +41,7 @@ with st.expander("📄 Loaded Environment Values", expanded=False):
         "OUTDIR": outdir,
         "SRCDIR": srcdir,
         "USER": user,
-        "SYSTEM": sys,
+        "SYSTEM": system_type,
         "INTERFACE": interface,
     })
 

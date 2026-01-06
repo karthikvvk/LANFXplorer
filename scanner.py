@@ -13,6 +13,9 @@ import requests
 import socket
 import time
 
+# Import centralized configuration
+from app_config import AppConfig
+
 
 host_ip = ""
 cidr = ""
@@ -98,11 +101,13 @@ def gethostlist():
     return result
     
 def scan_peers_udp(network=None):
-   
+    """Scan for peers using UDP broadcast."""
     global gateway, cidr, file_path, host_ip, broadcast, system_name, interface, user, pwd, dest_host
-    DISCOVERY_PORT = 4436
-    PEER_DISCOVERY_MSG = b"WHO_IS_PEER"
-    PEER_RESPONSE_PREFIX = b"I_AM_PEER"
+    
+    # Use centralized constants from AppConfig
+    DISCOVERY_PORT = AppConfig.PEER_DISCOVERY_PORT
+    PEER_DISCOVERY_MSG = AppConfig.PEER_DISCOVERY_MSG
+    PEER_RESPONSE_PREFIX = AppConfig.PEER_RESPONSE_PREFIX
     
     found = set()
     try:
@@ -142,10 +147,12 @@ def scan_peers_udp(network=None):
     return list(found)
 
 class PeerDiscoveryListener:
+    """Asyncio-based peer discovery listener - CANONICAL implementation."""
     
-    DISCOVERY_PORT = 4436
-    PEER_DISCOVERY_MSG = b"WHO_IS_PEER"
-    PEER_RESPONSE_PREFIX = b"I_AM_PEER"
+    # Use centralized constants from AppConfig
+    DISCOVERY_PORT = AppConfig.PEER_DISCOVERY_PORT
+    PEER_DISCOVERY_MSG = AppConfig.PEER_DISCOVERY_MSG
+    PEER_RESPONSE_PREFIX = AppConfig.PEER_RESPONSE_PREFIX
     
     def __init__(self, host_ip: str):
        
@@ -188,9 +195,13 @@ async def start_peer_discovery_listener(host_ip: str) -> PeerDiscoveryListener:
     await listener.start()
     return listener
 
-
-
+# ==================== DEPRECATED: ManualScanner ====================
+# NOTE: This class is DEPRECATED and UNUSED. It contains methods defined
+# incorrectly (missing 'self' parameter). Kept for reference only.
+# The active scanning is done by scan_peers_udp() and PeerDiscoveryListener.
+# ===================================================================
 class ManualScanner:
+    """DEPRECATED: This class is not in active use. Methods are incorrectly defined."""
     
     def __init__(self):
         global gateway, cidr, file_path, host_ip, broadcast, system_name, interface, user, pwd, dest_host

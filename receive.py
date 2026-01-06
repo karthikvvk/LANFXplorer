@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
+"""
+LANFXplorer QUIC Receiver
+
+Handles incoming file transfers and manages PKI/CA discovery.
+Renamed from recive.py to receive.py for correct spelling.
+"""
 import asyncio
 import os
 import sys
+import signal
 import getpass
 from pathlib import Path
 
@@ -9,29 +16,32 @@ from pathlib import Path
 APP_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(APP_DIR))
 
-# Now import local modules
-from startsetup import load_env_vars
+# Now import local modules - use new AppConfig for configuration
+from app_config import get_config, AppConfig
 from receiver_api_functions import start_receiver, stop_receiver
 from path_security import get_lanfxplorer_root, validate_path_access, ensure_lanfxplorer_directory
 from config_manager import get_password
 
-def on_file_received(filepath: str, filesize: int) -> None:
 
+def on_file_received(filepath: str, filesize: int) -> None:
+    """Callback when a file is successfully received."""
     print(f"[receiver] Received file: {filepath} ({filesize} bytes)")
 
 
 async def main() -> None:
-    env = load_env_vars()
+    # Use centralized AppConfig for configuration
+    config = get_config()
+    env = config.get_all()
 
-    recivhost = env.get("recivhost") or "0.0.0.0"
-    port = env.get("port") or 4433
-    cert_path = env.get("certi") or "cert.pem"
-    key_path = env.get("key") or "key.pem"
-    ca_cert = env.get("ca_cert") or env.get("CA_CERT")
-    user = env.get("user") or getpass.getuser()
+    recivhost = config.reciv_host or "0.0.0.0"
+    port = config.port or AppConfig.QUIC_PORT
+    cert_path = config.certi or "cert.pem"
+    key_path = config.key or "key.pem"
+    ca_cert = config.ca_cert
+    user = config.user or getpass.getuser()
     
     # SECURITY: Use Lanfxplorer directory as default, validate configured out_dir
-    configured_out_dir = env.get("out_dir")
+    configured_out_dir = config.out_dir
     if configured_out_dir:
         is_valid, error_msg = validate_path_access(configured_out_dir)
         if not is_valid:
@@ -50,7 +60,7 @@ async def main() -> None:
     out_dir = os.path.abspath(out_dir)
     os.makedirs(out_dir, exist_ok=True)
 
-    print(f"[receiver] Loaded from env:")
+    print(f"[receiver] Loaded from config:")
     print(f"          RECIVHOST={recivhost}")
     print(f"          PORT={port}")
     print(f"          CERTI={cert_path}")
@@ -61,7 +71,7 @@ async def main() -> None:
     from cryptography.hazmat.primitives.asymmetric import rsa
     from cryptography.hazmat.primitives import serialization
     
-    ca_ip = env.get("host") or recivhost
+    ca_ip = config.host or recivhost
     ca_mgr = CAManager(ca_ip, os.getcwd())
     
     if ca_mgr.check_ca_status():
@@ -138,7 +148,7 @@ async def main() -> None:
 
     from scanner import start_peer_discovery_listener
     peer_listener = await start_peer_discovery_listener(ca_ip)
-    print(f"[receiver] Peer discovery active on UDP port 4436")
+    print(f"[receiver] Peer discovery active on UDP port {AppConfig.PEER_DISCOVERY_PORT}")
 
     from pki.handshake import start_handshake_service
     
@@ -177,17 +187,36 @@ async def main() -> None:
 
     print(f"[receiver] QUIC Receiver listening on {recivhost}:{port}")
     print(f"[receiver] All services running:")
-    print(f"           - Peer Discovery (UDP:4436)")
-    print(f"           - Handshake Service (TCP:4437)")
+    print(f"           - Peer Discovery (UDP:{AppConfig.PEER_DISCOVERY_PORT})")
+    print(f"           - Handshake Service (TCP:{AppConfig.HANDSHAKE_PORT})")
     print(f"           - QUIC File Transfer (UDP:{port})")
     if ca_mgr.check_ca_status():
-        print(f"           - CA Service (UDP:4434, TCP:4435)")
+        print(f"           - CA Service (UDP:{AppConfig.CA_DISCOVERY_PORT}, TCP:{AppConfig.CA_SIGNING_PORT})")
     print("[receiver] Press Ctrl+C to stop.")
 
+    # === FIXED: Proper shutdown handling with asyncio.Event ===
+    # Instead of blocking forever with asyncio.Future(), use an Event
+    # that can be triggered by signal handlers for graceful shutdown
+    shutdown_event = asyncio.Event()
+    
+    # Set up signal handlers for graceful shutdown
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, shutdown_event.set)
+        except NotImplementedError:
+            # Windows doesn't support add_signal_handler
+            pass
+    
     try:
-        await asyncio.Future()  
+        await shutdown_event.wait()
     finally:
+        print("[receiver] Shutting down gracefully...")
         await stop_receiver(server)
+        if peer_listener:
+            peer_listener.stop()
+        if handshake_service:
+            await handshake_service.stop()
         print("[receiver] Server stopped.")
 
 

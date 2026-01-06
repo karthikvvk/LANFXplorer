@@ -1,5 +1,5 @@
 from datetime import datetime
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file as flask_send_file
 import os
 import json
 import requests
@@ -13,10 +13,11 @@ from pathlib import Path
 APP_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(APP_DIR))
 
-# Now import local modules
-from startsetup import *
-from scanner import *
-from sender_api_functions import quic_connect, send_file, close_connection 
+# Now import local modules - using AppConfig for centralized configuration
+from app_config import get_config, AppConfig
+from startsetup import load_env_vars  # Keep for backward compatibility
+from scanner import gethostlist, start_peer_discovery_listener
+from sender_api_functions import quic_connect, send_file as quic_send_file, close_connection
 from pki.store import PeerStore
 from pki.utils import fingerprint_pem, load_cert_pem
 from path_security import (
@@ -135,16 +136,23 @@ def _complete_transfer_task(task_id: str, success: bool, error: str = None):
 
 import threading
 
+# ==================== DEPRECATED: Threading-based Peer Discovery ====================
+# NOTE: This threading-based implementation is DEPRECATED.
+# The canonical peer discovery is the asyncio-based PeerDiscoveryListener in scanner.py
+# which is started by receive.py. This class is kept for reference/backup only.
+# ===================================================================================
 class PeerDiscoveryResponder(threading.Thread):
+    """DEPRECATED: Use PeerDiscoveryListener from scanner.py instead."""
+    
     def __init__(self):
         super().__init__()
         self.daemon = True
         self.running = True
-        self.discovery_port = 4436
-        self.discovery_msg = b"WHO_IS_PEER"
-        self.response_prefix = b"I_AM_PEER"
-        env = load_env_vars()
-        self.host_ip = env.get("host", "0.0.0.0")
+        self.discovery_port = AppConfig.PEER_DISCOVERY_PORT
+        self.discovery_msg = AppConfig.PEER_DISCOVERY_MSG
+        self.response_prefix = AppConfig.PEER_RESPONSE_PREFIX
+        config = get_config()
+        self.host_ip = config.host or "0.0.0.0"
 
     def run(self):
         print(f"[*] Starting Peer Discovery Responder on UDP {self.discovery_port}...")
@@ -173,11 +181,15 @@ class PeerDiscoveryResponder(threading.Thread):
                     print(f"[!] Peer Discovery Error: {e}")
 
 def start_peer_discovery():
-    try:
-        t = PeerDiscoveryResponder()
-        t.start()
-    except Exception as e:
-        print(f"[-] Failed to start peer discovery: {e}")
+    """DEPRECATED: Peer discovery is now handled by asyncio-based listener in scanner.py."""
+    print("[!] WARNING: start_peer_discovery() is deprecated. Using asyncio listener in receive.py instead.")
+    # Keeping code but not starting it - asyncio version is canonical
+    # try:
+    #     t = PeerDiscoveryResponder()
+    #     t.start()
+    # except Exception as e:
+    #     print(f"[-] Failed to start peer discovery: {e}")
+    pass
 
 
 @app.route('/health', methods=['GET'])
@@ -637,7 +649,7 @@ def fetch_ca():
     ca_path = os.environ.get("CA_CERT")
     if not ca_path or not os.path.exists(ca_path):
         return {"error": "CA not initialized"}, 404
-    return send_file(ca_path)
+    return flask_send_file(ca_path)
 
 
 @app.route('/peers/approve', methods=['POST'])

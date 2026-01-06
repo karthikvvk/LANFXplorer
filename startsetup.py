@@ -19,7 +19,8 @@ from config_manager import get_config_manager
 
 pwd = os.getcwd()
 user = getpass.getuser()
-sys = platform.system().lower()
+# NOTE: Using 'system_type' instead of 'sys' to avoid overwriting the sys module
+system_type = platform.system().lower()
 
 interface = None
 subnet = None
@@ -39,9 +40,9 @@ reciv_host = "0.0.0.0"
 ca_cert = os.path.join(pwd, "ca_cert.pem")
 
 def detect_interface():
-    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
+    global host_ip, cidr, interface, system_type, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
 
-    if sys.startswith("linux"):
+    if system_type.startswith("linux"):
 
         out = subprocess.check_output(["ip", "-o", "-4", "addr"], text=True).strip()
 
@@ -84,7 +85,7 @@ def detect_interface():
             raise Exception("[-] No Ethernet interface found")
         print("[+] Detected interface:", interface)
 
-    elif sys.startswith("win") or sys.startswith("nt"):
+    elif system_type.startswith("win") or system_type.startswith("nt"):
         cmd = [
             "powershell",
             "-NoProfile",
@@ -105,7 +106,7 @@ def detect_interface():
 
 def get_network_info():
 
-    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
+    global host_ip, cidr, interface, system_type, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
 
 
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -176,7 +177,7 @@ def get_network_info():
 
 def load_env_vars():
 
-    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert 
+    global host_ip, cidr, interface, system_type, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
     
     # override=True ensures .env values override any existing environment variables
     load_dotenv(override=True)
@@ -189,7 +190,7 @@ def load_env_vars():
 
     pwd = os.getenv("PWD", os.getcwd())
     user = os.getenv("USER", getpass.getuser())
-    sys = os.getenv("SYSTEM", platform.system().lower())
+    system_type = os.getenv("SYSTEM", platform.system().lower())
     interface = os.getenv("INTERFACE", interface)
     host_ip = os.getenv("HOST", "")
     subnet = os.getenv("SUBNET", "")
@@ -231,7 +232,7 @@ def load_env_vars():
         "out_dir": out_dir,
         "src_dir": src_dir,
         "interface": interface,
-        "system": sys,
+        "system": system_type,
         "pwd": pwd,
         "user": user,
         "subnet": subnet,
@@ -245,7 +246,7 @@ def load_env_vars():
     }
 
 def write_env(installer=False):
-    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
+    global host_ip, cidr, interface, system_type, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
     detect_interface()
     ls = os.listdir(pwd)
     if "key.pem" not in ls or "cert.pem" not in ls:
@@ -263,7 +264,7 @@ def write_env(installer=False):
         "BROADCAST": broadcast_address,
         "PWD": pwd,
         "USER": user,
-        "SYSTEM": sys,
+        "SYSTEM": system_type,
         "INTERFACE": interface,
         "PORT": port,
         "OUTDIR": secure_root,  # Use secure Lanfxplorer path
@@ -287,10 +288,8 @@ def write_env(installer=False):
     print(f"\n[+] Environment variables updated in {env_file}")
 
 
-    print(f"\n[+] Environment variables updated in {env_file}")
-
 def setup_pki_and_write_env():
-    global host_ip, cidr,  interface, sys, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
+    global host_ip, cidr, interface, system_type, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
     import asyncio
     from pki.ca_service import CAManager
     from cryptography.hazmat.primitives import serialization

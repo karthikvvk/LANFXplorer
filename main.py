@@ -86,7 +86,7 @@ def main():
         return
     
     time.sleep(2)  # Brief pause to ensure .env is written to disk
-    receiver = run_script("recive.py", wait=False)
+    receiver = run_script("receive.py", wait=False)
     if not receiver:
         return
     processes.append(("Receiver", receiver))

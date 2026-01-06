@@ -13,17 +13,24 @@ Protocol runs on TCP port 4437 (HANDSHAKE_PORT).
 import asyncio
 import logging
 import os
+import sys
 import socket
+from pathlib import Path
 from typing import Optional, Tuple
+
+# Add parent directory to path for app_config import
+_pki_dir = Path(__file__).parent.resolve()
+sys.path.insert(0, str(_pki_dir.parent))
 
 from pki.utils import fingerprint_pem, verify_cert_validity
 from pki.store import PeerStore
 from config_manager import get_password
+from app_config import AppConfig
 
 logger = logging.getLogger(__name__)
 
-# Constants
-HANDSHAKE_PORT = 4437
+# Use centralized constant from AppConfig
+HANDSHAKE_PORT = AppConfig.HANDSHAKE_PORT
 PROTOCOL_VERSION = b"P2P_HANDSHAKE_V1"
 
 # Message types
