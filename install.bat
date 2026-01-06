@@ -66,19 +66,23 @@ if not exist "%PY_DIR%\python.exe" (
 )
 
 REM ===============================
-REM OpenSSL 3.5 LTS standalone  
+REM OpenSSL 3.5 LTS (System Installation)  
 REM ===============================
-if not exist "%SSL_DIR%\bin\openssl.exe" (
-    echo [+] Installing OpenSSL 3.5.4 LTS (standalone)
+set "SYSTEM_SSL_PATH=C:\Program Files\OpenSSL-Win64\bin\openssl.exe"
+if not exist "%SYSTEM_SSL_PATH%" (
+    echo [+] Installing OpenSSL 3.5.4 LTS to system (Program Files)
     echo.
     echo IMPORTANT: The OpenSSL installer will open in a new window.
     echo You MUST accept the license agreement to continue installation.
+    echo The installer will install to: C:\Program Files\OpenSSL-Win64
     echo If you cancel or reject, the installation will fail.
     echo.
     pause
 
-    powershell -Command "Invoke-WebRequest -Uri 'https://slproweb.com/download/Win64OpenSSL_Light-3_5_4.exe' -OutFile '%OPT_DIR%\openssl_installer.exe'" && (
-        echo [+] OpenSSL installer download complete
+    set "DOWNLOAD_PATH=%USERPROFILE%\Downloads\openssl_installer.exe"
+    
+    powershell -Command "Invoke-WebRequest -Uri 'https://slproweb.com/download/Win64OpenSSL_Light-3_5_4.exe' -OutFile '%DOWNLOAD_PATH%'" && (
+        echo [+] OpenSSL installer downloaded to Downloads folder
     ) || (
         echo [ERROR] Failed to download OpenSSL installer
         exit /b 1
@@ -86,27 +90,29 @@ if not exist "%SSL_DIR%\bin\openssl.exe" (
 
     echo [+] Launching OpenSSL installer...
     echo [+] Please complete the installation wizard in the window that opens
+    echo [+] Accept the default installation path (Program Files)
     echo [+] The script will continue automatically once you finish
     echo.
     
-    REM Run the installer interactively and wait for completion
-    start /wait "" "%OPT_DIR%\openssl_installer.exe" /DIR="%SSL_DIR%"
+    REM Run the installer interactively without /DIR to use default location
+    start /wait "" "%DOWNLOAD_PATH%"
     
     echo [+] Installer closed, verifying installation...
     
-    REM Check if OpenSSL was actually installed
-    if exist "%SSL_DIR%\bin\openssl.exe" (
-        echo [+] OpenSSL installation complete
-        del "%OPT_DIR%\openssl_installer.exe"
+    REM Check if OpenSSL was installed to system location
+    if exist "%SYSTEM_SSL_PATH%" (
+        echo [+] OpenSSL installation complete at C:\Program Files\OpenSSL-Win64
+        del "%DOWNLOAD_PATH%" 2>nul
     ) else (
         echo.
         echo [ERROR] OpenSSL installation failed or was cancelled by user
         echo [ERROR] The installer must be accepted to continue
-        del "%OPT_DIR%\openssl_installer.exe" 2>nul
+        echo [ERROR] Expected location: C:\Program Files\OpenSSL-Win64\bin\openssl.exe
+        del "%DOWNLOAD_PATH%" 2>nul
         exit /b 1
     )
 ) else (
-    echo [✓] OpenSSL already present
+    echo [✓] OpenSSL already installed at C:\Program Files\OpenSSL-Win64
 )
 
 REM ===============================
@@ -124,6 +130,16 @@ echo [+] Installing Python dependencies
     echo [+] Dependencies installation complete
 ) || (
     echo [ERROR] Failed to install dependencies
+    exit /b 1
+)
+
+REM Reinstall cryptography to ensure it uses system OpenSSL
+echo [+] Reinstalling cryptography package for system OpenSSL compatibility
+"%PY_DIR%\python.exe" -m pip uninstall -y cryptography
+"%PY_DIR%\python.exe" -m pip install --no-cache-dir cryptography && (
+    echo [+] Cryptography package reinstalled successfully
+) || (
+    echo [ERROR] Failed to reinstall cryptography package
     exit /b 1
 )
 
@@ -146,7 +162,7 @@ echo ================================================
 echo [✓] Installation completed successfully!
 echo ================================================
 echo    Python 3.9.1: %PY_DIR%
-echo    OpenSSL 3.3.5 LTS: %SSL_DIR%
+echo    OpenSSL 3.5.4 LTS: C:\Program Files\OpenSSL-Win64
 echo    Desktop shortcut created
 echo ================================================
 echo.

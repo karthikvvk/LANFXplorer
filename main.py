@@ -60,9 +60,13 @@ def run_script(script_name: str, wait: bool = True):
 
 
 def run_ui():
-
-    ui_path = APP_DIR / "build" / "linux" / "x64" / "release" / "bundle" / "lanfxplorer"
-    # ui_path = "/home/muruga/Documents/LANFXplorer/build/linux/x64/debug/bundle/lanfxplorer"
+    # Platform-specific UI paths
+    if platform.system().lower() == "windows":
+        ui_path = APP_DIR / "build" / "windows" / "x64" / "runner" / "Release" / "lanfxplorer.exe"
+    else:
+        # Linux path (unchanged)
+        ui_path = APP_DIR / "build" / "linux" / "x64" / "release" / "bundle" / "lanfxplorer"
+    
     if not os.path.exists(ui_path):
         print_status("fail", f"UI executable not found: {ui_path}")
         return None

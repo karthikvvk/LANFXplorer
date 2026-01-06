@@ -377,4 +377,4 @@ def setup_pki_and_write_env():
     write_env()
 
 if __name__ == "__main__":
-    setup_pki_and_write_env()
+    write_env()
