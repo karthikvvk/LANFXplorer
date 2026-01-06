@@ -3,12 +3,19 @@ from flask import Flask, request, jsonify
 import os
 import json
 import requests
-from startsetup import *
-from scanner import *
-# from flask_cors import CORS
 import platform
 import getpass
-import asyncio  
+import asyncio
+import sys
+from pathlib import Path
+
+# CRITICAL: Set up paths FIRST, before importing any local modules
+APP_DIR = Path(__file__).parent.resolve()
+sys.path.insert(0, str(APP_DIR))
+
+# Now import local modules
+from startsetup import *
+from scanner import *
 from sender_api_functions import quic_connect, send_file, close_connection 
 from pki.store import PeerStore
 from pki.utils import fingerprint_pem, load_cert_pem

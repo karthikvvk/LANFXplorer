@@ -3,10 +3,19 @@ import os
 import ssl
 import struct
 import inspect
+import sys
 from typing import Awaitable, Callable, Optional
+from pathlib import Path
 
+# CRITICAL: Set up paths FIRST, before importing any local modules
+APP_DIR = Path(__file__).parent.resolve()
+sys.path.insert(0, str(APP_DIR))
+
+# Now import third-party modules
 from aioquic.asyncio import serve
 from aioquic.quic.configuration import QuicConfiguration
+
+# Now import local modules
 from pki.store import PeerStore
 from pki.utils import fingerprint_pem, verify_cert_validity, get_peer_cert_pem_from_writer
 from path_security import validate_path_access, get_lanfxplorer_root

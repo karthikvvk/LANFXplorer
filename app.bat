@@ -17,7 +17,8 @@ REM Set environment variables
 REM -------------------------------
 
 REM Add Python and OpenSSL to PATH
-set "PATH=%PY_PREFIX%;%PY_PREFIX%\Scripts;%OPENSSL_PREFIX%\bin;%PATH%"
+REM Note: OpenSSL DLLs are in the root openssl directory, binaries are in bin subdirectory
+set "PATH=%OPENSSL_PREFIX%;%OPENSSL_PREFIX%\bin;%PY_PREFIX%;%PY_PREFIX%\Scripts;%PATH%"
 
 REM Set Python environment variables
 set "PYTHONHOME=%PY_PREFIX%"

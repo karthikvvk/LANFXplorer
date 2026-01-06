@@ -3,6 +3,13 @@ import asyncio
 import os
 import sys
 import getpass
+from pathlib import Path
+
+# CRITICAL: Set up paths FIRST, before importing any local modules
+APP_DIR = Path(__file__).parent.resolve()
+sys.path.insert(0, str(APP_DIR))
+
+# Now import local modules
 from startsetup import load_env_vars
 from receiver_api_functions import start_receiver, stop_receiver
 from path_security import get_lanfxplorer_root, validate_path_access, ensure_lanfxplorer_directory

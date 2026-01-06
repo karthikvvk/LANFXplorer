@@ -2,7 +2,13 @@
 import asyncio
 import os
 import sys
+from pathlib import Path
 
+# CRITICAL: Set up paths FIRST, before importing any local modules  
+APP_DIR = Path(__file__).parent.resolve()
+sys.path.insert(0, str(APP_DIR))
+
+# Now import local modules
 from startsetup import load_env_vars
 from sender_api_functions import quic_connect, send_file, close_connection
 

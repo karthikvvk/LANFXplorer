@@ -10,16 +10,20 @@ Orchestrates the complete application startup in order:
 """
 import os
 import sys
-import subprocess
-import time
-import platform
 from pathlib import Path
 
-from startsetup import write_env
-
+# CRITICAL: Set up paths FIRST, before importing any local modules
 APP_DIR = Path(__file__).parent.resolve()
 os.chdir(APP_DIR)
 sys.path.insert(0, str(APP_DIR))
+
+# Now import other standard library modules
+import subprocess
+import time
+import platform
+
+# Now we can safely import local modules
+from startsetup import write_env
 
 
 def print_status(status: str, message: str):

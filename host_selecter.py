@@ -4,7 +4,14 @@ import requests
 import json
 from pathlib import Path
 import os
+import sys
 from dotenv import load_dotenv, set_key
+
+# CRITICAL: Set up paths FIRST, before importing any local modules
+APP_DIR = Path(__file__).parent.resolve()
+sys.path.insert(0, str(APP_DIR))
+
+# Now import local modules
 from startsetup import *
 
 st.set_page_config(page_title="Select Host", layout="centered")
