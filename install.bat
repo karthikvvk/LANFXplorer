@@ -69,20 +69,40 @@ REM ===============================
 REM OpenSSL 3.5 LTS standalone  
 REM ===============================
 if not exist "%SSL_DIR%\bin\openssl.exe" (
-    echo [+] Installing OpenSSL 3.5 LTS (standalone)
+    echo [+] Installing OpenSSL 3.5.4 LTS (standalone)
+    echo.
+    echo IMPORTANT: The OpenSSL installer will open in a new window.
+    echo You MUST accept the license agreement to continue installation.
+    echo If you cancel or reject, the installation will fail.
+    echo.
+    pause
 
-    powershell -Command "Invoke-WebRequest -Uri 'https://download.firedaemon.com/FireDaemon-OpenSSL/openssl-3.5.4.zip' -OutFile '%OPT_DIR%\openssl.zip'" && (
-        echo [+] OpenSSL download complete
+    powershell -Command "Invoke-WebRequest -Uri 'https://slproweb.com/download/Win64OpenSSL_Light-3_5_4.exe' -OutFile '%OPT_DIR%\openssl_installer.exe'" && (
+        echo [+] OpenSSL installer download complete
     ) || (
-        echo [ERROR] Failed to download OpenSSL
+        echo [ERROR] Failed to download OpenSSL installer
         exit /b 1
     )
 
-    powershell -Command "Expand-Archive '%OPT_DIR%\openssl.zip' '%SSL_DIR%' -Force" && (
-        echo [+] OpenSSL extraction complete
-        del "%OPT_DIR%\openssl.zip"
-    ) || (
-        echo [ERROR] Failed to extract OpenSSL
+    echo [+] Launching OpenSSL installer...
+    echo [+] Please complete the installation wizard in the window that opens
+    echo [+] The script will continue automatically once you finish
+    echo.
+    
+    REM Run the installer interactively and wait for completion
+    start /wait "" "%OPT_DIR%\openssl_installer.exe" /DIR="%SSL_DIR%"
+    
+    echo [+] Installer closed, verifying installation...
+    
+    REM Check if OpenSSL was actually installed
+    if exist "%SSL_DIR%\bin\openssl.exe" (
+        echo [+] OpenSSL installation complete
+        del "%OPT_DIR%\openssl_installer.exe"
+    ) else (
+        echo.
+        echo [ERROR] OpenSSL installation failed or was cancelled by user
+        echo [ERROR] The installer must be accepted to continue
+        del "%OPT_DIR%\openssl_installer.exe" 2>nul
         exit /b 1
     )
 ) else (
