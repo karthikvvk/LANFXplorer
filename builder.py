@@ -33,7 +33,7 @@ ITEMS = [
     "pubspec.yaml",
     "receiver_api_functions.py",
     "config_manager.py",
-    "recive.py",
+    "receive.py",
     "devtools_options.yaml",
     "requirements.txt",
     "files.iml",
@@ -50,6 +50,8 @@ ITEMS = [
     "main.py",
     "wifi_speed.py",
     "path_security.py",
+    "app_config.py"
+    ""
 ]
 
 # Set Flutter bundle source and executable name based on OS
