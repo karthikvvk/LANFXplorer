@@ -9,7 +9,7 @@ dump/
 .vscode/
 .agent/
 appbuild/
-./pkica_export/
+pkica_export/
 # Miscellaneous
 *.class
 *.log

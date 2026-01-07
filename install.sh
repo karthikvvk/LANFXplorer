@@ -1,6 +1,37 @@
 #!/usr/bin/env bash
 set -e
 
+# =================================
+# Terminal Detection & Re-launch
+# If not running in a terminal (e.g., double-clicked from GUI),
+# re-launch the script inside a terminal emulator
+# =================================
+if [ ! -t 0 ] && [ -z "$LANFXPLORER_IN_TERMINAL" ]; then
+  SCRIPT_PATH="$(readlink -f "$0")"
+  TERMINAL_CMD=""
+  
+  if command -v gnome-terminal >/dev/null 2>&1; then
+    TERMINAL_CMD="gnome-terminal -- bash -c"
+  elif command -v konsole >/dev/null 2>&1; then
+    TERMINAL_CMD="konsole -e bash -c"
+  elif command -v xfce4-terminal >/dev/null 2>&1; then
+    TERMINAL_CMD="xfce4-terminal -e bash -c"
+  elif command -v xterm >/dev/null 2>&1; then
+    TERMINAL_CMD="xterm -e bash -c"
+  elif command -v lxterminal >/dev/null 2>&1; then
+    TERMINAL_CMD="lxterminal -e bash -c"
+  elif command -v mate-terminal >/dev/null 2>&1; then
+    TERMINAL_CMD="mate-terminal -e bash -c"
+  fi
+  
+  if [ -n "$TERMINAL_CMD" ]; then
+    export LANFXPLORER_IN_TERMINAL=1
+    exec $TERMINAL_CMD "export LANFXPLORER_IN_TERMINAL=1; '$SCRIPT_PATH'; echo; read -p 'Press Enter to close...'"
+  else
+    echo "[!] No supported terminal emulator found. Running without terminal."
+  fi
+fi
+
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="$APP_DIR/.env"
 

@@ -8,7 +8,7 @@ import platform
 import datetime
 
 ROOT = os.getcwd()
-APPBUILD = os.path.join(ROOT, "appbuild")
+APPBUILD = os.path.join(ROOT, "LANFXplorer")
 SYSTEM = platform.system().lower()
 date = datetime.datetime.now().strftime("%Y-%m-%d")
 # Detect OS and build accordingly
@@ -72,7 +72,7 @@ def get_version_from_pubspec():
 
 
 def main():
-    # Fresh appbuild
+    # Fresh LANFXplorer
     if os.path.exists(APPBUILD):
         shutil.rmtree(APPBUILD)
     os.makedirs(APPBUILD)
@@ -115,14 +115,14 @@ def main():
             for root, dirs, files in os.walk(APPBUILD):
                 for file in files:
                     file_path = os.path.join(root, file)
-                    arcname = os.path.join("appbuild", os.path.relpath(file_path, APPBUILD))
+                    arcname = os.path.join("LANFXplorer", os.path.relpath(file_path, APPBUILD))
                     zipf.write(file_path, arcname)
         print(f"[*] Created archive: {archive_name}")
     else:
         # Create tar.gz for Linux
         archive_name = f"{SYSTEM}_{date}_{version}.tar.gz"
         with tarfile.open(archive_name, "w:gz") as tar:
-            tar.add(APPBUILD, arcname="appbuild")
+            tar.add(APPBUILD, arcname="LANFXplorer")
         print(f"[*] Created archive: {archive_name}")
 
 

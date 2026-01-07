@@ -191,10 +191,13 @@ class HandshakeService:
     
     async def start(self):
         """Start the handshake service."""
+        # Use reuse_address/reuse_port to allow restart without 'address already in use' error
         self.server = await asyncio.start_server(
             self.handle_client,
             self.host,
-            HANDSHAKE_PORT
+            HANDSHAKE_PORT,
+            reuse_address=True,
+            reuse_port=True
         )
         logger.info(f"[Handshake] Service started on {self.host}:{HANDSHAKE_PORT}")
     

@@ -276,7 +276,8 @@ class _MainPageState extends State<MainPage> {
                     // Local files panel
                     Expanded(
                       child: _FileExplorerPane(
-                        title: 'Local Machine',
+                        title:
+                            'Local Machine (${sessionProvider.currentMachine?.ipAddress})',
                         subtitle:
                             sessionProvider.currentMachine?.username ?? '',
                         isLocal: true,
@@ -290,7 +291,8 @@ class _MainPageState extends State<MainPage> {
                     // Remote files panel
                     Expanded(
                       child: _FileExplorerPane(
-                        title: 'Remote Machine',
+                        title:
+                            'Remote Machine (${sessionProvider.destinationMachine?.ipAddress})',
                         subtitle:
                             sessionProvider.destinationMachine?.username ?? '',
                         isLocal: false,

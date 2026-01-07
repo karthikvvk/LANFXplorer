@@ -2,6 +2,14 @@
 setlocal enabledelayedexpansion
 
 REM ===============================
+REM Set console title and banner
+REM ===============================
+title LANFXplorer Installation
+echo.
+echo ==================================================
+echo     LANFXplorer Installation Starting...
+echo ==================================================
+echo.
 REM Resolve app directory
 REM ===============================
 set "APP_DIR=%~dp0"

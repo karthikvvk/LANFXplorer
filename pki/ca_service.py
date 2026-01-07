@@ -103,10 +103,12 @@ class CAManager:
     async def start_discovery(self):
         loop = asyncio.get_running_loop()
         # Bind to 0.0.0.0 to listen, but we need to know how to respond
+        # Use reuse_port=True to allow restart without 'address already in use' error
         self.discovery_transport, _ = await loop.create_datagram_endpoint(
             lambda: CADiscoveryProtocol(self.is_ca, self),
             local_addr=('0.0.0.0', DISCOVERY_PORT),
-            allow_broadcast=True
+            allow_broadcast=True,
+            reuse_port=True  # Allow port reuse on restart
         )
         logger.info(f"Discovery started on port {DISCOVERY_PORT}")
 
@@ -167,9 +169,12 @@ class CAManager:
         with open(os.path.join(self.cert_dir, "ca_key.pem"), "wb") as f:
             f.write(ca_key_pem)
 
-        # Start Signing Server
+        # Start Signing Server with reuse_address to allow restart
         server = CASigningServer(ca_cert_pem, ca_key_pem)
-        await asyncio.start_server(server.handle_client, '0.0.0.0', SIGNING_PORT)
+        await asyncio.start_server(
+            server.handle_client, '0.0.0.0', SIGNING_PORT,
+            reuse_address=True, reuse_port=True  # Allow port reuse on restart
+        )
         logger.info(f"CA Signing Server started on {SIGNING_PORT}")
         
         # Restart discovery as CA
@@ -200,11 +205,14 @@ class CAManager:
             with open(ca_cert_path, "rb") as f: ca_cert_pem = f.read()
             with open(ca_key_path, "rb") as f: ca_key_pem = f.read()
             
-            # Start TCP Signing Server
+            # Start TCP Signing Server with reuse_address to allow restart
             server = CASigningServer(ca_cert_pem, ca_key_pem)
             # We don't store the server object, letting it run in background loop.
             # Ideally we should keep track of it to close it, but for this service it's fine.
-            self.signing_server = await asyncio.start_server(server.handle_client, '0.0.0.0', SIGNING_PORT)
+            self.signing_server = await asyncio.start_server(
+                server.handle_client, '0.0.0.0', SIGNING_PORT,
+                reuse_address=True, reuse_port=True  # Allow port reuse on restart
+            )
             logger.info(f"CA Signing Server started on {SIGNING_PORT}")
             
             # Start UDP Discovery (as responder since self.is_ca is True)

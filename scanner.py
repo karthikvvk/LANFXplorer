@@ -177,10 +177,12 @@ class PeerDiscoveryListener:
     async def start(self):
         loop = asyncio.get_running_loop()
         
+        # Use reuse_port=True to allow restart without 'address already in use' error
         self.transport, self.protocol = await loop.create_datagram_endpoint(
             lambda: self.Protocol(self.host_ip),
             local_addr=('0.0.0.0', self.DISCOVERY_PORT),
-            allow_broadcast=True
+            allow_broadcast=True,
+            reuse_port=True  # Allow port reuse on restart
         )
         print(f"[+] Peer Discovery Listener started on port {self.DISCOVERY_PORT}")
     
