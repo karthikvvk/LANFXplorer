@@ -60,3 +60,5 @@ app.*.map.json
 
 .prompt_attachments
 *.hologram.dart
+*.tar*
+*.zip*

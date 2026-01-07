@@ -125,6 +125,25 @@ def main():
             tar.add(APPBUILD, arcname="LANFXplorer")
         print(f"[*] Created archive: {archive_name}")
 
+    # Cleanup: Delete the temporary LANFXplorer directory used for building
+    if os.path.exists(APPBUILD):
+        shutil.rmtree(APPBUILD)
+        print(f"[*] Cleaned up temporary build directory: {APPBUILD}")
+
+    # Output release instructions for the user
+    print("\n" + "=" * 60)
+    print("BUILD COMPLETE! Ready to release.")
+    print("=" * 60)
+    print("\nTo publish this release, run the following commands:\n")
+    print(f"# 1. Create and push a version tag")
+    print(f'git tag -a v{version} -m "LANFXplorer v{version}"')
+    print(f"git push origin v{version}")
+    print(f"\n# 2. Create the GitHub release with the archive")
+    print(f'gh release create v{version} {archive_name} \\')
+    print(f'  --title "LANFXplorer v{version}" \\')
+    print(f'  --notes "Release v{version}"')
+    print("\n" + "=" * 60)
+
 
 if __name__ == "__main__":
     main()
