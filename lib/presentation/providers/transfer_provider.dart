@@ -219,8 +219,7 @@ class TransferProvider extends ChangeNotifier {
         }
         pollAttempts++;
 
-        final status = await _apiService.getTransferStatus(backendTaskId,
-            remoteHost: sourceId);
+        final status = await _apiService.getTransferStatus(backendTaskId);
         if (status == null) {
           // Polling failed, wait and retry
           if (pollAttempts > 10) {
