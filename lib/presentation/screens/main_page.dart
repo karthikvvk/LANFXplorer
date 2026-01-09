@@ -539,9 +539,7 @@ class _FileExplorerPane extends StatelessWidget {
                         scrollDirection: Axis.horizontal,
                         child: _BreadcrumbPath(
                           path: currentPath,
-                          rootPath: isLocal
-                              ? fileSystemProvider.rootPath
-                              : fileSystemProvider.remoteRootPath,
+                          rootPath: fileSystemProvider.rootPath,
                           isLocal: isLocal,
                           onSegmentTap: (path) {
                             if (isLocal) {

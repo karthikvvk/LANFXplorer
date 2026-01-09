@@ -113,15 +113,7 @@ async def _handle_stream(
             except Exception:
                 pass
 
-        # Sanitize filename but preserve folder structure for folder transfers
-        # Remove any leading slashes or .. to prevent directory traversal
-        filename = filename.lstrip('/')
-        while filename.startswith('../') or filename.startswith('..\\'):
-            filename = filename[3:]
-        filename = filename.replace('/../', '/').replace('/..\\', '/')
-        # Avoid absolute paths - if after sanitization it looks absolute, use basename
-        if filename.startswith('/') or (len(filename) > 1 and filename[1] == ':'):
-            filename = os.path.basename(filename)
+        filename = os.path.basename(filename)
 
         if filename == "__AUTH__":
             raw = await reader.readexactly(8)
