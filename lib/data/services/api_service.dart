@@ -179,20 +179,29 @@ class ApiService {
   }
 
   /// Poll the status of a transfer task.
-  Future<TransferStatusResult?> getTransferStatus(String taskId) async {
+  /// If [remoteHost] is provided, polls the remote server (for fetch operations).
+  Future<TransferStatusResult?> getTransferStatus(String taskId,
+      {String? remoteHost}) async {
     try {
+      final baseUrl =
+          remoteHost != null ? 'http://$remoteHost:5000' : ApiEndpoints.baseUrl;
+      final url = '$baseUrl/transfer_status/$taskId';
+      AppLogger.info('[StatusPoll] Polling: $url');
       final response = await _client.get(
-        Uri.parse('${ApiEndpoints.baseUrl}/transfer_status/$taskId'),
+        Uri.parse(url),
         headers: {'Accept': 'application/json'},
-      ).timeout(const Duration(seconds: 300));
+      ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
+        AppLogger.info('[StatusPoll] Got status: ${data['status']}');
         return TransferStatusResult.fromJson(data);
       }
+      AppLogger.warning(
+          '[StatusPoll] Non-200 response: ${response.statusCode} - ${response.body}');
       return null;
     } catch (e) {
-      AppLogger.error('Get transfer status error: $e');
+      AppLogger.error('[StatusPoll] Error polling $remoteHost: $e');
       return null;
     }
   }
