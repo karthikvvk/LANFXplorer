@@ -436,22 +436,38 @@ def send_files():
 
     port = env.get("port") or 4433
 
-    # verify files exist
-    valid_files = []
+    # verify files exist and expand directories recursively
+    # Each entry is (file_path, base_dir) where base_dir is used to compute relative paths
+    valid_files = []  # list of (file_path, base_dir) tuples
     missing = []
     for f in files:
         if os.path.isfile(f):
-            valid_files.append(f)
+            # Single file - use parent directory as base
+            valid_files.append((f, os.path.dirname(f)))
+        elif os.path.isdir(f):
+            # Directory - use parent of the directory as base so folder name is preserved
+            dir_parent = os.path.dirname(os.path.normpath(f))
+            # Recursively walk directory and add all files
+            file_count = 0
+            for root, dirs, filenames in os.walk(f):
+                for filename in filenames:
+                    file_path = os.path.join(root, filename)
+                    valid_files.append((file_path, dir_parent))
+                    file_count += 1
+            if file_count == 0:
+                print(f"[send_files] Directory '{f}' is empty, skipping")
         else:
             missing.append(f)
 
     if not valid_files:
         return jsonify({"status": "error", "message": "no valid files to send", "missing": missing}), 400
+    
+    print(f"[send_files] Expanded to {len(valid_files)} files from {len(files)} input paths")
 
     # ========== PATH RESTRICTION CHECK ==========
     # Validate all files are within the allowed root path
-    for f in valid_files:
-        is_valid, error_msg = validate_path_access(f)
+    for file_path, base_dir in valid_files:
+        is_valid, error_msg = validate_path_access(file_path)
         if not is_valid:
             print(f"[!] Send files access denied: {error_msg}")
             return jsonify({
@@ -462,7 +478,9 @@ def send_files():
 
     # Create task for tracking
 
-    task_id = _create_transfer_task(valid_files, remote_host, "send")
+    # Extract just file paths for task tracking
+    file_paths_only = [fp for fp, bd in valid_files]
+    task_id = _create_transfer_task(file_paths_only, remote_host, "send")
     
     def _do_send_background():
         """Background thread to perform the actual transfer."""
@@ -489,23 +507,23 @@ def send_files():
                 )
                 try:
                     # Calculate total size for all files
-                    total_size = sum(os.path.getsize(f) for f in valid_files)
+                    total_size = sum(os.path.getsize(fp) for fp, bd in valid_files)
                     bytes_sent_total = 0
                     
-                    for path in valid_files:
+                    for file_path, base_dir in valid_files:
                         # Update current file in task
                         with _transfer_lock:
                             if task_id in _transfer_tasks:
-                                _transfer_tasks[task_id]["current_file"] = path
+                                _transfer_tasks[task_id]["current_file"] = file_path
                         
-                        file_size = os.path.getsize(path)
+                        file_size = os.path.getsize(file_path)
                         
                         def on_progress(bytes_sent_file):
                             nonlocal bytes_sent_total
                             current_total = bytes_sent_total + bytes_sent_file
                             _update_transfer_progress(task_id, current_total, total_size)
                         
-                        await send_file_with_progress(conn, path, on_progress, dest_dir=dest_dir)
+                        await send_file_with_progress(conn, file_path, on_progress, dest_dir=dest_dir, base_dir=base_dir)
                         bytes_sent_total += file_size
                     
                     _complete_transfer_task(task_id, True)
@@ -528,7 +546,7 @@ def send_files():
         "task_id": task_id,
         "remote_host": remote_host,
         "port": port,
-        "files": valid_files,
+        "files": file_paths_only,
         "missing": missing
     }), 202  # 202 Accepted
 

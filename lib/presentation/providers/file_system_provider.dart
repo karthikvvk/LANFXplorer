@@ -19,6 +19,7 @@ class FileSystemProvider extends ChangeNotifier {
 
   // Root path restriction - set from outDir in environment
   String? _rootPath;
+  String? _remoteRootPath; // Remote machine's root path
 
   // Error state for displaying connection/API errors
   String? _localError;
@@ -29,6 +30,7 @@ class FileSystemProvider extends ChangeNotifier {
   String get localCurrentPath => _localCurrentPath;
   String get remoteCurrentPath => _remoteCurrentPath;
   String? get rootPath => _rootPath;
+  String? get remoteRootPath => _remoteRootPath;
   bool get isLoadingLocal => _isLoadingLocal;
   bool get isLoadingRemote => _isLoadingRemote;
 
@@ -128,16 +130,19 @@ class FileSystemProvider extends ChangeNotifier {
               await _apiService.getDefaultPath(remoteHost: _remoteHost);
           if (defaultPath != null && defaultPath.isNotEmpty) {
             _remoteCurrentPath = defaultPath;
+            _remoteRootPath = defaultPath; // Store as root for breadcrumbs
             AppLogger.info('Remote default path resolved to: $defaultPath');
           } else {
             // Fallback to local Lanfxplorer path format
             _remoteCurrentPath = getLanfxplorerRoot();
+            _remoteRootPath = _remoteCurrentPath;
             AppLogger.warning(
                 'Could not get remote default path, using local format');
           }
         } catch (e) {
           AppLogger.error('Failed to get remote default path: $e');
           _remoteCurrentPath = getLanfxplorerRoot();
+          _remoteRootPath = _remoteCurrentPath;
         }
       } else if (path != null) {
         _remoteCurrentPath = path;

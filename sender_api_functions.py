@@ -130,7 +130,8 @@ async def send_file_with_progress(
     connection: QuicSenderConnection, 
     file_path: str, 
     on_progress: callable = None,
-    dest_dir: str = None
+    dest_dir: str = None,
+    base_dir: str = None
 ) -> None:
     """Send a file with progress callback support.
     
@@ -139,17 +140,25 @@ async def send_file_with_progress(
         file_path: Path to the file to send
         on_progress: Optional callback function that receives bytes_sent so far
         dest_dir: Optional destination directory on the remote machine
+        base_dir: Optional base directory for computing relative paths (for folder transfers)
     """
     abs_path = os.path.abspath(file_path)
 
     if not os.path.isfile(abs_path):
         return
 
-    try:
-        cwd = os.getcwd()
-        rel_path = os.path.relpath(abs_path, cwd)
-    except Exception:
-        rel_path = os.path.basename(abs_path)
+    # Compute relative path - use base_dir if provided (for folder transfers)
+    if base_dir:
+        try:
+            rel_path = os.path.relpath(abs_path, base_dir)
+        except Exception:
+            rel_path = os.path.basename(abs_path)
+    else:
+        try:
+            cwd = os.getcwd()
+            rel_path = os.path.relpath(abs_path, cwd)
+        except Exception:
+            rel_path = os.path.basename(abs_path)
 
     if rel_path.startswith(".."):
         header_name = os.path.basename(abs_path)
