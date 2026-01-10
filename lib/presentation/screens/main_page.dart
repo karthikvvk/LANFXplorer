@@ -78,6 +78,8 @@ class _MainPageState extends State<MainPage> {
     if (success) {
       _showSnackBar('Successfully sent ${selectedFiles.length} file(s)');
       fileSystemProvider.clearLocalSelection();
+      // Refresh remote file list to show newly sent files
+      await fileSystemProvider.loadRemoteFiles();
     } else {
       _showSnackBar('Failed to send files', isError: true);
     }

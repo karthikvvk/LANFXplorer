@@ -54,6 +54,9 @@ def get_root_path():
 
 _transfer_tasks = {}  # task_id -> {status, progress, total_size, transferred, files, error, start_time, estimated_duration}
 
+# Mapping of task_id -> remote_host for fetch operations that need to proxy status requests
+_fetch_task_mapping = {}  # task_id -> {"remote_host": str, "remote_task_id": str}
+
 _transfer_lock = Lock()
 
 # Cache WiFi speed (detect once at startup or first transfer)
@@ -471,6 +474,12 @@ def send_files():
             client_key = env.get("CLIENT_KEY")
             ca_cert = env.get("CA_CERT") or env.get("ca_cert")
 
+            print(f"[send_files] Starting background transfer to {remote_host}:{port}")
+            print(f"[send_files] Files: {valid_files}")
+            print(f"[send_files] dest_dir: {dest_dir}")
+            print(f"[send_files] CA cert: {ca_cert}")
+            print(f"[send_files] Client cert: {client_cert}")
+
             if not ca_cert:
                 _complete_transfer_task(task_id, False, "CA_CERT not set")
                 return
@@ -478,6 +487,7 @@ def send_files():
             async def _async_send():
                 from sender_api_functions import send_file_with_progress
                 
+                print(f"[send_files] Connecting to QUIC {remote_host}:{port}...")
                 conn = await quic_connect(
                     host=remote_host,
                     port=port,
@@ -487,12 +497,14 @@ def send_files():
                     client_key=client_key,
                     ca_cert=ca_cert,
                 )
+                print(f"[send_files] QUIC connection established!")
                 try:
                     # Calculate total size for all files
                     total_size = sum(os.path.getsize(f) for f in valid_files)
                     bytes_sent_total = 0
                     
                     for path in valid_files:
+                        print(f"[send_files] Sending file: {path}")
                         # Update current file in task
                         with _transfer_lock:
                             if task_id in _transfer_tasks:
@@ -507,16 +519,22 @@ def send_files():
                         
                         await send_file_with_progress(conn, path, on_progress, dest_dir=dest_dir)
                         bytes_sent_total += file_size
+                        print(f"[send_files] File sent successfully: {path}")
                     
+                    print(f"[send_files] All files sent, marking task complete")
                     _complete_transfer_task(task_id, True)
                 finally:
                     await close_connection(conn)
+                    print(f"[send_files] Connection closed")
 
             asyncio.run(_async_send())
             
         except Exception as e:
-            print(f"[send_files] Transfer error: {e}")
-            _complete_transfer_task(task_id, False, str(e))
+            import traceback
+            error_msg = str(e) or f"{type(e).__name__}: (no message)"
+            print(f"[send_files] Transfer error: {error_msg}")
+            traceback.print_exc()
+            _complete_transfer_task(task_id, False, error_msg)
 
     # Start transfer in background thread
     thread = threading.Thread(target=_do_send_background, daemon=True)
@@ -536,6 +554,41 @@ def send_files():
 @app.route("/transfer_status/<task_id>", methods=["GET"])
 def transfer_status(task_id):
     """Get the status of a transfer task."""
+    # First check if this is a fetch task that needs proxying to remote host
+    fetch_info = None
+    with _transfer_lock:
+        if task_id in _fetch_task_mapping:
+            fetch_info = _fetch_task_mapping[task_id].copy()
+    
+    # If it's a fetch task, proxy the status request to the remote host
+    if fetch_info is not None:
+        remote_host = fetch_info["remote_host"]
+        remote_task_id = fetch_info["remote_task_id"]
+        print(f"[transfer_status] Proxying status for task {task_id[:8]}... to {remote_host}")
+        
+        try:
+            # Proxy the status request to the remote host
+            proxy_url = f"http://{remote_host}:5000/transfer_status/{remote_task_id}"
+            print(f"[transfer_status] GET {proxy_url}")
+            resp = requests.get(proxy_url, timeout=5)
+            
+            if resp.status_code == 200:
+                remote_status = resp.json()
+                print(f"[transfer_status] Remote status: {remote_status.get('status')}, progress: {remote_status.get('progress')}")
+                # Clean up mapping once transfer is complete or failed
+                if remote_status.get("status") in ("completed", "failed"):
+                    with _transfer_lock:
+                        _fetch_task_mapping.pop(task_id, None)
+                    print(f"[transfer_status] Task {task_id[:8]}... completed, removed from fetch mapping")
+                return jsonify(remote_status), 200
+            else:
+                print(f"[transfer_status] Remote returned error: {resp.status_code} - {resp.text}")
+                return jsonify({"status": "error", "message": f"Remote returned {resp.status_code}"}), resp.status_code
+        except requests.exceptions.RequestException as e:
+            print(f"[!] Failed to proxy transfer_status to {remote_host}: {e}")
+            return jsonify({"status": "error", "message": f"Failed to contact remote host: {str(e)}"}), 502
+    
+    # Otherwise, check local tasks
     with _transfer_lock:
         if task_id not in _transfer_tasks:
             return jsonify({"status": "error", "message": "Task not found"}), 404
@@ -599,6 +652,17 @@ def receive_files():
         # Accept both 200 and 202 (async) responses as success
         if response.status_code in (200, 202):
             result = response.json()
+            
+            # Register the remote task_id for proxying status requests
+            remote_task_id = result.get("task_id")
+            if remote_task_id:
+                with _transfer_lock:
+                    _fetch_task_mapping[remote_task_id] = {
+                        "remote_host": remote_host,
+                        "remote_task_id": remote_task_id
+                    }
+                print(f"[fetch] Registered task {remote_task_id[:8]}... for status proxying to {remote_host}")
+            
             return jsonify({
                 "status": "success",
                 "message": f"Requested {len(files)} file(s) from {remote_host}",
