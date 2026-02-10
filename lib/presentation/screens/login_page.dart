@@ -1,4 +1,5 @@
 import 'package:lanfxplorer/presentation/providers/env_provider.dart';
+import 'package:lanfxplorer/data/services/api_service.dart';
 import 'package:lanfxplorer/theme.dart';
 import 'package:lanfxplorer/core/constants/path_security.dart';
 import 'package:flutter/material.dart';
@@ -26,6 +27,7 @@ class _LoginPageState extends State<LoginPage> {
   bool _obscureConfirmPassword = true;
   bool _isLoading = false;
   bool _isCheckingCredentials = true;
+  bool _isResetting = false;
   String? _directoryError; // Error message when invalid directory selected
 
   @override
@@ -177,6 +179,67 @@ class _LoginPageState extends State<LoginPage> {
     _defaultDirController.text = _getDefaultDownloadsPath();
     _directoryError = null; // Default path is always valid
     _createProfile();
+  }
+
+  Future<void> _resetEnvironment() async {
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.warning_amber_rounded,
+            color: Colors.red, size: 48),
+        title: const Text('Reset Environment?'),
+        content: const Text(
+          'This will delete all certificates and clear network configurations.\n\n'
+          'The app will close and restart with a fresh setup.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.red,
+            ),
+            child: const Text('Reset & Restart'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isResetting = true);
+
+    try {
+      final apiService = ApiService();
+      final success = await apiService.resetEnvironment();
+
+      if (success) {
+        // Give the backend a moment to process, then exit.
+        // The backend restart (via app.sh) will relaunch the UI.
+        await Future.delayed(const Duration(milliseconds: 500));
+        exit(0);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Reset failed. Please try again.')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isResetting = false);
+      }
+    }
   }
 
   @override
@@ -449,6 +512,57 @@ class _LoginPageState extends State<LoginPage> {
                   )
                       .animate()
                       .fadeIn(duration: 400.ms, delay: 800.ms)
+                      .slideY(begin: 0.2, end: 0),
+
+                  const SizedBox(height: AppSpacing.xl),
+
+                  // Divider
+                  Row(
+                    children: [
+                      Expanded(
+                          child: Divider(
+                              color: colorScheme.outline.withOpacity(0.3))),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.md),
+                        child: Text(
+                          'Troubleshoot',
+                          style: context.textStyles.bodySmall?.withColor(
+                              colorScheme.onSurfaceVariant.withOpacity(0.6)),
+                        ),
+                      ),
+                      Expanded(
+                          child: Divider(
+                              color: colorScheme.outline.withOpacity(0.3))),
+                    ],
+                  ).animate().fadeIn(duration: 400.ms, delay: 900.ms),
+
+                  const SizedBox(height: AppSpacing.md),
+
+                  // Reset Environment button
+                  OutlinedButton.icon(
+                    onPressed:
+                        (_isLoading || _isResetting) ? null : _resetEnvironment,
+                    icon: _isResetting
+                        ? const SizedBox(
+                            height: 16,
+                            width: 16,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.red),
+                          )
+                        : const Icon(Icons.restart_alt, size: 18),
+                    label: const Text('Reset Environment'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      foregroundColor: Colors.red,
+                      side: const BorderSide(color: Colors.red, width: 1),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppRadius.md),
+                      ),
+                    ),
+                  )
+                      .animate()
+                      .fadeIn(duration: 400.ms, delay: 1000.ms)
                       .slideY(begin: 0.2, end: 0),
                 ],
               ),

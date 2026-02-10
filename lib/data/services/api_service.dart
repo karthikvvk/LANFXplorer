@@ -284,6 +284,28 @@ class ApiService {
     }
   }
 
+  /// Reset environment: delete certificates and clear .env configs.
+  /// The backend will restart the entire app after this call.
+  Future<bool> resetEnvironment() async {
+    try {
+      AppLogger.info('Requesting environment reset...');
+      final response = await _client.post(
+        Uri.parse('${ApiEndpoints.baseUrl}${ApiEndpoints.resetEnv}'),
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        AppLogger.info('Environment reset successful');
+        return true;
+      }
+      AppLogger.error('Reset failed: ${response.statusCode}');
+      return false;
+    } catch (e, stack) {
+      AppLogger.error('Reset error', error: e, stackTrace: stack);
+      return false;
+    }
+  }
+
   void dispose() {
     _client.close();
   }

@@ -8,4 +8,5 @@ class ApiEndpoints {
   static const String transferFetch = '/receive_files';
   static const String reconnect = '/health';
   static const String defaultPath = '/default_path';
+  static const String resetEnv = '/reset_environment';
 }

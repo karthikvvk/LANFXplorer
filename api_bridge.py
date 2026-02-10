@@ -818,6 +818,35 @@ def handshake():
 
 
 
+@app.route('/reset_environment', methods=['POST'])
+def reset_environment_endpoint():
+    """Reset certificates and .env configs, then restart the app."""
+    try:
+        from reset_env import reset_environment
+        reset_environment()
+        print("[reset] Environment reset complete. Scheduling app restart...")
+
+        def _restart_app():
+            """Restart the entire app after a brief delay."""
+            time.sleep(1.5)  # Give time for the HTTP response to be sent
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+            app_sh = os.path.join(app_dir, "app.sh")
+            print(f"[reset] Restarting via: {app_sh}")
+            os.execv("/bin/bash", ["/bin/bash", app_sh])
+
+        restart_thread = threading.Thread(target=_restart_app, daemon=False)
+        restart_thread.start()
+
+        return jsonify({
+            "status": "success",
+            "message": "Environment reset. App will restart shortly."
+        }), 200
+
+    except Exception as e:
+        print(f"[!] Reset error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 if __name__ == "__main__":
     start_peer_discovery()
     app.run(

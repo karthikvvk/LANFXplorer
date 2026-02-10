@@ -68,66 +68,66 @@ NPROC="$(nproc || echo 1)"
 
 mkdir -p "$OPT_DIR"
 
-# ===============================
-# Build OpenSSL (standalone)
-# ===============================
-echo "[+] Building OpenSSL $OPENSSL_VERSION"
+# # ===============================
+# # Build OpenSSL (standalone)
+# # ===============================
+# echo "[+] Building OpenSSL $OPENSSL_VERSION"
 
-mkdir -p "$OPENSSL_SRC"
-cd "$OPENSSL_SRC"
+# mkdir -p "$OPENSSL_SRC"
+# cd "$OPENSSL_SRC"
 
-if [ ! -d "openssl-$OPENSSL_VERSION" ]; then
-  wget https://www.openssl.org/source/openssl-$OPENSSL_VERSION.tar.gz
-  tar -xzf openssl-$OPENSSL_VERSION.tar.gz
-fi
+# if [ ! -d "openssl-$OPENSSL_VERSION" ]; then
+#   wget https://www.openssl.org/source/openssl-$OPENSSL_VERSION.tar.gz
+#   tar -xzf openssl-$OPENSSL_VERSION.tar.gz
+# fi
 
-cd "openssl-$OPENSSL_VERSION"
+# cd "openssl-$OPENSSL_VERSION"
 
-./Configure linux-x86_64 \
-  --prefix="$OPENSSL_PREFIX" \
-  --openssldir="$OPENSSL_PREFIX/ssl" \
-  shared
+# ./Configure linux-x86_64 \
+#   --prefix="$OPENSSL_PREFIX" \
+#   --openssldir="$OPENSSL_PREFIX/ssl" \
+#   shared
 
-make -j"$NPROC"
-make install_sw
+# make -j"$NPROC"
+# make install_sw
 
-# ===============================
-# Build Python 3.9.1 (standalone)
-# ===============================
-echo "[+] Building Python $PYTHON_VERSION"
+# # ===============================
+# # Build Python 3.9.1 (standalone)
+# # ===============================
+# echo "[+] Building Python $PYTHON_VERSION"
 
-mkdir -p "$PYTHON_SRC"
-cd "$PYTHON_SRC"
+# mkdir -p "$PYTHON_SRC"
+# cd "$PYTHON_SRC"
 
-if [ ! -d "Python-$PYTHON_VERSION" ]; then
-  wget https://www.python.org/ftp/python/$PYTHON_VERSION/Python-$PYTHON_VERSION.tgz
-  tar -xzf Python-$PYTHON_VERSION.tgz
-fi
+# if [ ! -d "Python-$PYTHON_VERSION" ]; then
+#   wget https://www.python.org/ftp/python/$PYTHON_VERSION/Python-$PYTHON_VERSION.tgz
+#   tar -xzf Python-$PYTHON_VERSION.tgz
+# fi
 
-cd "Python-$PYTHON_VERSION"
+# cd "Python-$PYTHON_VERSION"
 
-export CPPFLAGS="-I$OPENSSL_PREFIX/include"
-export LDFLAGS="-L$OPENSSL_PREFIX/lib"
-export LD_RUN_PATH="$OPENSSL_PREFIX/lib"
-export PKG_CONFIG_PATH="$OPENSSL_PREFIX/lib/pkgconfig"
+# export CPPFLAGS="-I$OPENSSL_PREFIX/include"
+# export LDFLAGS="-L$OPENSSL_PREFIX/lib"
+# export LD_RUN_PATH="$OPENSSL_PREFIX/lib"
+# export PKG_CONFIG_PATH="$OPENSSL_PREFIX/lib/pkgconfig"
 
-./configure \
-  --prefix="$PY_PREFIX" \
-  --with-openssl="$OPENSSL_PREFIX" \
-  --enable-optimizations \
-  --without-ensurepip
+# ./configure \
+#   --prefix="$PY_PREFIX" \
+#   --with-openssl="$OPENSSL_PREFIX" \
+#   --enable-optimizations \
+#   --without-ensurepip
 
-make -j"$NPROC"
-make install
+# make -j"$NPROC"
+# make install
 
-# ===============================
-# pip + requirements
-# ===============================
-echo "[+] Installing pip + dependencies"
+# # ===============================
+# # pip + requirements
+# # ===============================
+# echo "[+] Installing pip + dependencies"
 
-"$PY_PREFIX/bin/python3" -m ensurepip
-"$PY_PREFIX/bin/python3" -m pip install --upgrade pip
-"$PY_PREFIX/bin/python3" -m pip install -r "$APP_DIR/requirements.txt"
+# "$PY_PREFIX/bin/python3" -m ensurepip
+# "$PY_PREFIX/bin/python3" -m pip install --upgrade pip
+# "$PY_PREFIX/bin/python3" -m pip install -r "$APP_DIR/requirements.txt"
 
 # ===============================
 # Runtime directories
@@ -163,3 +163,7 @@ else
 fi
 
 echo "[✓] Installation complete"
+
+
+chmod +x app.sh
+./app.sh
