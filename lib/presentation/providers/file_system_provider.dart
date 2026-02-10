@@ -294,4 +294,58 @@ class FileSystemProvider extends ChangeNotifier {
       loadRemoteFiles(_remoteCurrentPath);
     }
   }
+
+  /// Create a new empty file in the current directory
+  Future<bool> createFileInDir(String name, {required bool isLocal}) async {
+    if (_apiService == null) return false;
+    final currentPath = isLocal ? _localCurrentPath : _remoteCurrentPath;
+    final fullPath = '$currentPath/$name';
+    final remoteHost = isLocal ? null : _remoteHost;
+
+    final success =
+        await _apiService.createFile(fullPath, remoteHost: remoteHost);
+    if (success) {
+      if (isLocal) {
+        await loadLocalFiles();
+      } else {
+        await loadRemoteFiles();
+      }
+    }
+    return success;
+  }
+
+  /// Create a new folder in the current directory
+  Future<bool> createFolderInDir(String name, {required bool isLocal}) async {
+    if (_apiService == null) return false;
+    final currentPath = isLocal ? _localCurrentPath : _remoteCurrentPath;
+    final fullPath = '$currentPath/$name';
+    final remoteHost = isLocal ? null : _remoteHost;
+
+    final success =
+        await _apiService.createFolder(fullPath, remoteHost: remoteHost);
+    if (success) {
+      if (isLocal) {
+        await loadLocalFiles();
+      } else {
+        await loadRemoteFiles();
+      }
+    }
+    return success;
+  }
+
+  /// Delete a file or folder
+  Future<bool> deleteFileItem(String path, {required bool isLocal}) async {
+    if (_apiService == null) return false;
+    final remoteHost = isLocal ? null : _remoteHost;
+
+    final success = await _apiService.deleteItem(path, remoteHost: remoteHost);
+    if (success) {
+      if (isLocal) {
+        await loadLocalFiles();
+      } else {
+        await loadRemoteFiles();
+      }
+    }
+    return success;
+  }
 }

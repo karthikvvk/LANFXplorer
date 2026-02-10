@@ -1,4 +1,5 @@
 import 'package:lanfxplorer/core/utils/logger.dart';
+import 'package:lanfxplorer/data/models/file_item.dart';
 import 'package:lanfxplorer/data/services/api_service.dart';
 import 'package:lanfxplorer/presentation/components/drag_drop_zone.dart';
 import 'package:lanfxplorer/presentation/components/file_item_card.dart';
@@ -600,69 +601,341 @@ class _FileExplorerPane extends StatelessWidget {
                           ),
                         ),
                       )
-                    : files.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.folder_open,
-                                  size: 64,
-                                  color: colorScheme.onSurfaceVariant,
-                                ),
-                                const SizedBox(height: AppSpacing.md),
-                                Text(
-                                  'No files',
-                                  style: context.textStyles.titleMedium,
-                                ),
-                              ],
-                            ),
-                          )
-                        : ListView.builder(
-                            padding: const EdgeInsets.all(AppSpacing.sm),
-                            itemCount: files.length,
-                            itemBuilder: (context, index) {
-                              final file = files[index];
-                              return Padding(
-                                padding: const EdgeInsets.only(
-                                  bottom: AppSpacing.xs,
-                                ),
-                                child: FileItemCard(
-                                  file: file,
-                                  onTap: () {
-                                    if (isLocal) {
-                                      fileSystemProvider
-                                          .toggleLocalFileSelection(index);
-                                    } else {
-                                      fileSystemProvider
-                                          .toggleRemoteFileSelection(index);
-                                    }
-                                  },
-                                  onDoubleTap: file.isDirectory
-                                      ? () {
-                                          if (isLocal) {
-                                            fileSystemProvider
-                                                .loadLocalFiles(file.path);
-                                          } else {
-                                            fileSystemProvider
-                                                .loadRemoteFiles(file.path);
-                                          }
-                                        }
-                                      : null,
+                    : GestureDetector(
+                        onSecondaryTapUp: (details) {
+                          _showBackgroundContextMenu(
+                            context,
+                            details.globalPosition,
+                            fileSystemProvider,
+                            isLocal,
+                          );
+                        },
+                        behavior: HitTestBehavior.translucent,
+                        child: files.isEmpty
+                            ? Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.folder_open,
+                                      size: 64,
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
+                                    const SizedBox(height: AppSpacing.md),
+                                    Text(
+                                      'No files',
+                                      style: context.textStyles.titleMedium,
+                                    ),
+                                    const SizedBox(height: AppSpacing.sm),
+                                    Text(
+                                      'Right-click to create',
+                                      style: context.textStyles.bodySmall
+                                          ?.withColor(
+                                              colorScheme.onSurfaceVariant),
+                                    ),
+                                  ],
                                 ),
                               )
-                                  .animate()
-                                  .fadeIn(
-                                    duration: 200.ms,
-                                    delay: (20 * index).ms,
+                            : ListView.builder(
+                                padding: const EdgeInsets.all(AppSpacing.sm),
+                                itemCount: files.length,
+                                itemBuilder: (context, index) {
+                                  final file = files[index];
+                                  return Padding(
+                                    padding: const EdgeInsets.only(
+                                      bottom: AppSpacing.xs,
+                                    ),
+                                    child: GestureDetector(
+                                      onSecondaryTapUp: (details) {
+                                        _showItemContextMenu(
+                                          context,
+                                          details.globalPosition,
+                                          fileSystemProvider,
+                                          file,
+                                          isLocal,
+                                        );
+                                      },
+                                      child: FileItemCard(
+                                        file: file,
+                                        onTap: () {
+                                          if (isLocal) {
+                                            fileSystemProvider
+                                                .toggleLocalFileSelection(
+                                                    index);
+                                          } else {
+                                            fileSystemProvider
+                                                .toggleRemoteFileSelection(
+                                                    index);
+                                          }
+                                        },
+                                        onDoubleTap: file.isDirectory
+                                            ? () {
+                                                if (isLocal) {
+                                                  fileSystemProvider
+                                                      .loadLocalFiles(
+                                                          file.path);
+                                                } else {
+                                                  fileSystemProvider
+                                                      .loadRemoteFiles(
+                                                          file.path);
+                                                }
+                                              }
+                                            : null,
+                                      ),
+                                    ),
                                   )
-                                  .slideX(begin: 0.1, end: 0);
-                            },
-                          ),
+                                      .animate()
+                                      .fadeIn(
+                                        duration: 200.ms,
+                                        delay: (20 * index).ms,
+                                      )
+                                      .slideX(begin: 0.1, end: 0);
+                                },
+                              ),
+                      ),
           ),
         ],
       ),
     );
+  }
+
+  /// Show context menu when right-clicking on empty space (background)
+  void _showBackgroundContextMenu(
+    BuildContext context,
+    Offset position,
+    FileSystemProvider provider,
+    bool isLocal,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+    showMenu(
+      context: context,
+      position: RelativeRect.fromLTRB(
+          position.dx, position.dy, position.dx, position.dy),
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.sm)),
+      items: [
+        PopupMenuItem(
+          child: Row(
+            children: [
+              Icon(Icons.note_add, size: 18, color: colorScheme.primary),
+              const SizedBox(width: AppSpacing.sm),
+              const Text('New File'),
+            ],
+          ),
+          onTap: () =>
+              _showCreateDialog(context, provider, isLocal, isFile: true),
+        ),
+        PopupMenuItem(
+          child: Row(
+            children: [
+              Icon(Icons.create_new_folder,
+                  size: 18, color: colorScheme.primary),
+              const SizedBox(width: AppSpacing.sm),
+              const Text('New Folder'),
+            ],
+          ),
+          onTap: () =>
+              _showCreateDialog(context, provider, isLocal, isFile: false),
+        ),
+      ],
+    );
+  }
+
+  /// Show context menu when right-clicking on a file/folder item
+  void _showItemContextMenu(
+    BuildContext context,
+    Offset position,
+    FileSystemProvider provider,
+    FileItem file,
+    bool isLocal,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+    showMenu(
+      context: context,
+      position: RelativeRect.fromLTRB(
+          position.dx, position.dy, position.dx, position.dy),
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.sm)),
+      items: <PopupMenuEntry<dynamic>>[
+        PopupMenuItem(
+          child: Row(
+            children: [
+              Icon(Icons.note_add, size: 18, color: colorScheme.primary),
+              const SizedBox(width: AppSpacing.sm),
+              const Text('New File'),
+            ],
+          ),
+          onTap: () =>
+              _showCreateDialog(context, provider, isLocal, isFile: true),
+        ),
+        PopupMenuItem(
+          child: Row(
+            children: [
+              Icon(Icons.create_new_folder,
+                  size: 18, color: colorScheme.primary),
+              const SizedBox(width: AppSpacing.sm),
+              const Text('New Folder'),
+            ],
+          ),
+          onTap: () =>
+              _showCreateDialog(context, provider, isLocal, isFile: false),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          child: Row(
+            children: [
+              Icon(Icons.delete_outline, size: 18, color: colorScheme.error),
+              const SizedBox(width: AppSpacing.sm),
+              Text('Delete', style: TextStyle(color: colorScheme.error)),
+            ],
+          ),
+          onTap: () => _showDeleteDialog(context, provider, file, isLocal),
+        ),
+      ],
+    );
+  }
+
+  /// Show dialog to create a new file or folder
+  void _showCreateDialog(
+    BuildContext context,
+    FileSystemProvider provider,
+    bool isLocal, {
+    required bool isFile,
+  }) {
+    final controller = TextEditingController();
+    final type = isFile ? 'File' : 'Folder';
+
+    // Use Future.delayed to avoid issues with PopupMenu dismiss
+    Future.delayed(Duration.zero, () {
+      if (!context.mounted) return;
+      showDialog(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('New $type'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: InputDecoration(
+              hintText: isFile ? 'filename.txt' : 'folder name',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+              ),
+            ),
+            onSubmitted: (_) async {
+              final name = controller.text.trim();
+              if (name.isEmpty) return;
+              Navigator.of(dialogContext).pop();
+              bool success;
+              if (isFile) {
+                success =
+                    await provider.createFileInDir(name, isLocal: isLocal);
+              } else {
+                success =
+                    await provider.createFolderInDir(name, isLocal: isLocal);
+              }
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(success
+                        ? '$type "$name" created'
+                        : 'Failed to create $type'),
+                    behavior: SnackBarBehavior.floating,
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              }
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final name = controller.text.trim();
+                if (name.isEmpty) return;
+                Navigator.of(dialogContext).pop();
+                bool success;
+                if (isFile) {
+                  success =
+                      await provider.createFileInDir(name, isLocal: isLocal);
+                } else {
+                  success =
+                      await provider.createFolderInDir(name, isLocal: isLocal);
+                }
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(success
+                          ? '$type "$name" created'
+                          : 'Failed to create $type'),
+                      behavior: SnackBarBehavior.floating,
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                }
+              },
+              child: const Text('Create'),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+
+  /// Show confirmation dialog to delete a file or folder
+  void _showDeleteDialog(
+    BuildContext context,
+    FileSystemProvider provider,
+    FileItem file,
+    bool isLocal,
+  ) {
+    final type = file.isDirectory ? 'folder' : 'file';
+
+    Future.delayed(Duration.zero, () {
+      if (!context.mounted) return;
+      showDialog(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          icon: Icon(Icons.warning_amber_rounded,
+              color: Theme.of(dialogContext).colorScheme.error, size: 40),
+          title: Text('Delete $type?'),
+          content: Text(
+            'Are you sure you want to delete "${file.name}"?\n\n'
+            '${file.isDirectory ? "This will delete the folder and all its contents. " : ""}'
+            'This action cannot be undone.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                Navigator.of(dialogContext).pop();
+                final success =
+                    await provider.deleteFileItem(file.path, isLocal: isLocal);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(success
+                          ? '"${file.name}" deleted'
+                          : 'Failed to delete "${file.name}"'),
+                      behavior: SnackBarBehavior.floating,
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                }
+              },
+              style: FilledButton.styleFrom(
+                  backgroundColor: Theme.of(dialogContext).colorScheme.error),
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
+      );
+    });
   }
 }
 

@@ -29,7 +29,10 @@ def reset_environment():
         'GATEWAY',
         'BROADCAST',
         'INTERFACE',
-        'RECIVHOST' # Resetting this to default or empty might be good, but 0.0.0.0 is usually a safe default. I'll clear it to be safe.
+        'RECIVHOST',
+        'USER',
+        'PASSWORD',
+        'DEST_HOST',
     ]
 
     print("\nModifying .env configs...")

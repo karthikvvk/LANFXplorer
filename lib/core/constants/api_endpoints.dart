@@ -9,4 +9,7 @@ class ApiEndpoints {
   static const String reconnect = '/health';
   static const String defaultPath = '/default_path';
   static const String resetEnv = '/reset_environment';
+  static const String createFile = '/create_file';
+  static const String createFolder = '/create_folder';
+  static const String deleteItem = '/delete_item';
 }

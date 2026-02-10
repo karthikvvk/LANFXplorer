@@ -818,6 +818,116 @@ def handshake():
 
 
 
+@app.route('/create_file', methods=['POST'])
+def create_file():
+    """Create a new empty file."""
+    data = request.get_json() or {}
+    path = data.get("path")
+    if not path:
+        return jsonify({"status": "error", "message": "path is required"}), 400
+
+    remote_host = data.get("remote_host")
+    if remote_host:
+        env = load_env_vars()
+        my_ip = env.get("host")
+        if remote_host != my_ip and remote_host != "127.0.0.1" and remote_host != "localhost":
+            try:
+                resp = requests.post(f"http://{remote_host}:5000/create_file", json={"path": path}, timeout=10)
+                return jsonify(resp.json()), resp.status_code
+            except requests.exceptions.RequestException as e:
+                return jsonify({"status": "error", "message": f"Failed to contact remote host: {str(e)}"}), 502
+
+    path = os.path.normpath(path)
+    is_valid, error_msg = validate_path_access(path)
+    if not is_valid:
+        return jsonify({"status": "error", "message": error_msg}), 403
+
+    try:
+        parent = os.path.dirname(path)
+        if not os.path.isdir(parent):
+            return jsonify({"status": "error", "message": f"Parent directory does not exist: {parent}"}), 404
+        with open(path, 'w') as f:
+            pass  # Create empty file
+        print(f"[create_file] Created: {path}")
+        return jsonify({"status": "success", "path": path}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/create_folder', methods=['POST'])
+def create_folder():
+    """Create a new folder."""
+    data = request.get_json() or {}
+    path = data.get("path")
+    if not path:
+        return jsonify({"status": "error", "message": "path is required"}), 400
+
+    remote_host = data.get("remote_host")
+    if remote_host:
+        env = load_env_vars()
+        my_ip = env.get("host")
+        if remote_host != my_ip and remote_host != "127.0.0.1" and remote_host != "localhost":
+            try:
+                resp = requests.post(f"http://{remote_host}:5000/create_folder", json={"path": path}, timeout=10)
+                return jsonify(resp.json()), resp.status_code
+            except requests.exceptions.RequestException as e:
+                return jsonify({"status": "error", "message": f"Failed to contact remote host: {str(e)}"}), 502
+
+    path = os.path.normpath(path)
+    is_valid, error_msg = validate_path_access(path)
+    if not is_valid:
+        return jsonify({"status": "error", "message": error_msg}), 403
+
+    try:
+        os.makedirs(path, exist_ok=False)
+        print(f"[create_folder] Created: {path}")
+        return jsonify({"status": "success", "path": path}), 200
+    except FileExistsError:
+        return jsonify({"status": "error", "message": "Folder already exists"}), 409
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/delete_item', methods=['POST'])
+def delete_item():
+    """Delete a file or folder (recursive)."""
+    import shutil
+    data = request.get_json() or {}
+    path = data.get("path")
+    if not path:
+        return jsonify({"status": "error", "message": "path is required"}), 400
+
+    remote_host = data.get("remote_host")
+    if remote_host:
+        env = load_env_vars()
+        my_ip = env.get("host")
+        if remote_host != my_ip and remote_host != "127.0.0.1" and remote_host != "localhost":
+            try:
+                resp = requests.post(f"http://{remote_host}:5000/delete_item", json={"path": path}, timeout=10)
+                return jsonify(resp.json()), resp.status_code
+            except requests.exceptions.RequestException as e:
+                return jsonify({"status": "error", "message": f"Failed to contact remote host: {str(e)}"}), 502
+
+    path = os.path.normpath(path)
+    is_valid, error_msg = validate_path_access(path)
+    if not is_valid:
+        return jsonify({"status": "error", "message": error_msg}), 403
+
+    if not os.path.exists(path):
+        return jsonify({"status": "error", "message": "Path does not exist"}), 404
+
+    try:
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+            print(f"[delete_item] Deleted folder: {path}")
+        else:
+            os.remove(path)
+            print(f"[delete_item] Deleted file: {path}")
+        return jsonify({"status": "success", "path": path}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route('/reset_environment', methods=['POST'])
 def reset_environment_endpoint():
     """Reset certificates and .env configs, then restart the app."""

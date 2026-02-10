@@ -284,6 +284,70 @@ class ApiService {
     }
   }
 
+  /// Create a new empty file at the given path.
+  /// If remoteHost is provided, the file is created on the remote machine.
+  Future<bool> createFile(String path, {String? remoteHost}) async {
+    try {
+      final Map<String, dynamic> body = {'path': path};
+      if (remoteHost != null) body['remote_host'] = remoteHost;
+
+      final response = await _client
+          .post(
+            Uri.parse('${ApiEndpoints.baseUrl}${ApiEndpoints.createFile}'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      return response.statusCode == 200;
+    } catch (e, stack) {
+      AppLogger.error('Create file error', error: e, stackTrace: stack);
+      return false;
+    }
+  }
+
+  /// Create a new folder at the given path.
+  Future<bool> createFolder(String path, {String? remoteHost}) async {
+    try {
+      final Map<String, dynamic> body = {'path': path};
+      if (remoteHost != null) body['remote_host'] = remoteHost;
+
+      final response = await _client
+          .post(
+            Uri.parse('${ApiEndpoints.baseUrl}${ApiEndpoints.createFolder}'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      return response.statusCode == 200;
+    } catch (e, stack) {
+      AppLogger.error('Create folder error', error: e, stackTrace: stack);
+      return false;
+    }
+  }
+
+  /// Delete a file or folder at the given path.
+  Future<bool> deleteItem(String path, {String? remoteHost}) async {
+    try {
+      final Map<String, dynamic> body = {'path': path};
+      if (remoteHost != null) body['remote_host'] = remoteHost;
+
+      final response = await _client
+          .post(
+            Uri.parse('${ApiEndpoints.baseUrl}${ApiEndpoints.deleteItem}'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      return response.statusCode == 200;
+    } catch (e, stack) {
+      AppLogger.error('Delete item error', error: e, stackTrace: stack);
+      return false;
+    }
+  }
+
   /// Reset environment: delete certificates and clear .env configs.
   /// The backend will restart the entire app after this call.
   Future<bool> resetEnvironment() async {
