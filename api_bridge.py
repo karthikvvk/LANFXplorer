@@ -818,6 +818,31 @@ def handshake():
 
 
 
+@app.route('/check_password', methods=['GET'])
+def check_password():
+    """Check if a password is configured in the keyring."""
+    try:
+        from config_manager import has_password
+        return jsonify({"has_password": has_password()}), 200
+    except Exception as e:
+        return jsonify({"has_password": False, "error": str(e)}), 200
+
+
+@app.route('/set_password', methods=['POST'])
+def set_password_endpoint():
+    """Store a password in the OS keyring."""
+    data = request.get_json()
+    password = data.get('password', '')
+    if not password:
+        return jsonify({"error": "Password is required"}), 400
+    try:
+        from config_manager import set_password
+        success = set_password(password)
+        return jsonify({"success": success}), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/create_file', methods=['POST'])
 def create_file():
     """Create a new empty file."""

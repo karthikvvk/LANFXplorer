@@ -1,4 +1,7 @@
 import 'dart:io';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:lanfxplorer/core/constants/api_endpoints.dart';
 
 import '../models/app_env.dart';
 
@@ -54,19 +57,22 @@ class EnvLoader {
     );
   }
 
-  /// Check if password is configured.
-  ///
-  /// NOTE: As of the security refactor, passwords are now stored securely in
-  /// the OS keyring (via config_manager.py), NOT in the .env file.
-  /// This method now always returns true since password setup is handled
-  /// by the Python backend's config_manager.
-  ///
-  /// DEPRECATED: Do not rely on this method for password detection.
-  /// Use the /handshake endpoint to verify authentication capability.
+  /// Check if password is configured by querying the backend keyring.
   static Future<bool> hasPassword() async {
-    // Passwords are now stored in OS keyring, not .env file
-    // The config_manager.py handles secure password storage
-    // Return true to indicate the backend should be consulted for password auth
-    return true;
+    try {
+      final response = await http
+          .get(
+              Uri.parse('${ApiEndpoints.baseUrl}${ApiEndpoints.checkPassword}'))
+          .timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['has_password'] == true;
+      }
+      return false;
+    } catch (_) {
+      // Backend not reachable — no valid session
+      return false;
+    }
   }
 }

@@ -8,6 +8,9 @@ import 'package:go_router/go_router.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
 import 'dart:io';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:lanfxplorer/core/constants/api_endpoints.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -153,6 +156,17 @@ class _LoginPageState extends State<LoginPage> {
       if (!foundUser) newLines.add('USER=$username');
 
       await envFile.writeAsString(newLines.join('\n'));
+
+      // Store password in OS keyring for session persistence
+      try {
+        await http.post(
+          Uri.parse('${ApiEndpoints.baseUrl}/set_password'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'password': password}),
+        );
+      } catch (_) {
+        // Non-fatal: .env still has the password as fallback
+      }
 
       if (mounted) {
         // Reload environment so username persists throughout the app

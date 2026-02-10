@@ -1,6 +1,14 @@
 import os
 
 def reset_environment():
+    # 0. Clear password from OS keyring
+    try:
+        from config_manager import delete_password
+        delete_password()
+        print("Cleared password from keyring")
+    except Exception as e:
+        print(f"Warning: Could not clear keyring password: {e}")
+
     # 1. Delete Certificate Files
     files_to_delete = [
         'cert.pem',
