@@ -6,11 +6,13 @@ import tarfile
 import zipfile
 import platform
 import datetime
+import re
 
 ROOT = os.getcwd()
 APPBUILD = os.path.join(ROOT, "LANFXplorer")
 SYSTEM = platform.system().lower()
 date = datetime.datetime.now().strftime("%Y-%m-%d")
+
 # Detect OS and build accordingly
 try:
     os.system("flutter")
@@ -22,6 +24,7 @@ try:
         os.system("flutter clean && flutter pub get && flutter build linux --release")
 except:
     print("flutter not found")
+
 # Files and directories to include
 ITEMS = [
     "analysis_options.yaml",
@@ -61,6 +64,106 @@ if SYSTEM.startswith("win"):
 else:
     FLUTTER_BUNDLE_SRC = "/build/linux/x64/release/bundle"
     EXECUTABLE_NAME = "lanfxplorer"
+
+
+def comment_out_logs(file_path):
+    """
+    Comment out console.log and print statements in a file.
+    Handles JavaScript/TypeScript (.js, .ts, .jsx, .tsx), Python (.py), and Dart (.dart) files.
+    """
+    # Determine file extension
+    ext = os.path.splitext(file_path)[1].lower()
+    
+    # Skip non-code files
+    if ext not in ['.js', '.ts', '.jsx', '.tsx', '.py', '.dart']:
+        return False
+    
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except Exception as e:
+        print(f"[!] Could not read {file_path}: {e}")
+        return False
+    
+    original_content = content
+    modified = False
+    
+    if ext in ['.js', '.ts', '.jsx', '.tsx', '.dart']:
+        # Comment out console.log (but NOT console.error, console.warn, etc.)
+        # Match console.log with various whitespace patterns
+        lines = content.split('\n')
+        new_lines = []
+        
+        for line in lines:
+            # Check if line contains console.log (not already commented)
+            if 'console.log' in line and not line.strip().startswith('//'):
+                # Make sure it's actually console.log and not console.error, etc.
+                if re.search(r'\bconsole\.log\s*\(', line):
+                    # Comment it out
+                    new_lines.append('//' + line)
+                    modified = True
+                else:
+                    new_lines.append(line)
+            else:
+                new_lines.append(line)
+        
+        content = '\n'.join(new_lines)
+    
+    if ext == '.py' or ext == '.dart':
+        # Comment out print statements (not already commented)
+        lines = content.split('\n')
+        new_lines = []
+        
+        for line in lines:
+            # Check if line contains print( and is not already commented
+            if ext == '.py':
+                comment_char = '#'
+            else:
+                comment_char = '//'
+            
+            if not line.strip().startswith(comment_char):
+                # Match print( with word boundary to avoid matching substring in function names
+                if re.search(r'\bprint\s*\(', line):
+                    # Comment it out
+                    new_lines.append(comment_char + line)
+                    modified = True
+                else:
+                    new_lines.append(line)
+            else:
+                new_lines.append(line)
+        
+        content = '\n'.join(new_lines)
+    
+    # Write back if modified
+    if modified and content != original_content:
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            return True
+        except Exception as e:
+            print(f"[!] Could not write {file_path}: {e}")
+            return False
+    
+    return False
+
+
+def process_directory(directory):
+    """
+    Recursively process all files in a directory and comment out console.log and print statements.
+    """
+    files_modified = 0
+    
+    for root, dirs, files in os.walk(directory):
+        # Skip node_modules, .git, and other common directories
+        dirs[:] = [d for d in dirs if d not in ['node_modules', '.git', '.dart_tool', 'build', '.idea']]
+        
+        for file in files:
+            file_path = os.path.join(root, file)
+            if comment_out_logs(file_path):
+                files_modified += 1
+                print(f"[*] Commented logs in: {os.path.relpath(file_path, directory)}")
+    
+    return files_modified
 
 
 def get_version_from_pubspec():
@@ -103,6 +206,11 @@ def main():
         print(f"[*] Copied {EXECUTABLE_NAME} to root directory for easy testing")
     else:
         print(f"[!] Warning: Executable not found at {executable_src}")
+
+    # Comment out console.log and print statements in the build directory
+    print("\n[*] Commenting out console.log and print statements...")
+    files_modified = process_directory(APPBUILD)
+    print(f"[*] Modified {files_modified} files")
 
     # Read version
     version = get_version_from_pubspec()

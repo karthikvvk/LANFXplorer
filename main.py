@@ -154,12 +154,14 @@ def run_script(script_name: str, wait: bool = True):
 
 
 def run_ui():
-    # Platform-specific UI paths
+    # Platform-specific UI paths, with debug (development) fallback
     if platform.system().lower() == "windows":
         ui_path = APP_DIR / "build" / "windows" / "x64" / "runner" / "Release" / "lanfxplorer.exe"
     else:
-        # Linux path (unchanged)
-        ui_path = APP_DIR / "build" / "linux" / "x64" / "release" / "bundle" / "lanfxplorer"
+        # Linux: try debug build first (development), then release (custom build)
+        debug_path = APP_DIR / "build" / "linux" / "x64" / "debug" / "bundle" / "lanfxplorer"
+        release_path = APP_DIR / "build" / "linux" / "x64" / "release" / "bundle" / "lanfxplorer"
+        ui_path = debug_path if debug_path.exists() else release_path
     
     if not os.path.exists(ui_path):
         print_status("fail", f"UI executable not found: {ui_path}")
