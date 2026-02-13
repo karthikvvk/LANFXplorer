@@ -113,7 +113,13 @@ async def _handle_stream(
             except Exception:
                 pass
 
-        filename = os.path.basename(filename)
+        # Sanitize path but PRESERVE subdirectory structure for folder transfers
+        # Remove any leading slashes or drive letters to prevent absolute path writes
+        filename = filename.lstrip("/")
+        # Prevent directory traversal attacks while keeping legitimate subdirs
+        parts = filename.replace("\\", "/").split("/")
+        safe_parts = [p for p in parts if p and p != ".."]
+        filename = "/".join(safe_parts) if safe_parts else "unnamed_file"
 
         if filename == "__AUTH__":
             raw = await reader.readexactly(8)
@@ -221,6 +227,15 @@ async def _handle_stream(
             base_dir = os.path.join(base_dir, peer_fingerprint)
         os.makedirs(base_dir, exist_ok=True)
         path = os.path.join(base_dir, filename)
+
+        # SECURITY: Validate the final save path is still within the allowed root
+        final_abs_path = os.path.normpath(os.path.abspath(path))
+        is_valid, error_msg = validate_path_access(final_abs_path)
+        if not is_valid:
+            print(f"[receiver] SECURITY: Rejected final save path: {error_msg}")
+            writer.write(f"REJECTED:invalid_save_path".encode())
+            await writer.drain()
+            return
 
         print(f"[receiver] Receiving file: {filename} ({filesize} bytes) -> {path}")
 

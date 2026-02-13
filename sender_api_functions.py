@@ -130,7 +130,8 @@ async def send_file_with_progress(
     connection: QuicSenderConnection, 
     file_path: str, 
     on_progress: callable = None,
-    dest_dir: str = None
+    dest_dir: str = None,
+    rel_path: str = None
 ) -> None:
     """Send a file with progress callback support.
     
@@ -139,24 +140,29 @@ async def send_file_with_progress(
         file_path: Path to the file to send
         on_progress: Optional callback function that receives bytes_sent so far
         dest_dir: Optional destination directory on the remote machine
+        rel_path: Optional relative path to preserve folder structure (e.g. "myfolder/sub/file.txt")
     """
     abs_path = os.path.abspath(file_path)
 
     if not os.path.isfile(abs_path):
         return
 
-    try:
-        cwd = os.getcwd()
-        rel_path = os.path.relpath(abs_path, cwd)
-    except Exception:
-        rel_path = os.path.basename(abs_path)
-
-    if rel_path.startswith(".."):
-        header_name = os.path.basename(abs_path)
+    if rel_path:
+        # Use explicitly provided relative path (for folder transfers)
+        header_name = rel_path.replace("\\", "/")
     else:
-        header_name = rel_path
+        try:
+            cwd = os.getcwd()
+            computed_rel_path = os.path.relpath(abs_path, cwd)
+        except Exception:
+            computed_rel_path = os.path.basename(abs_path)
 
-    header_name = header_name.replace("\\", "/")
+        if computed_rel_path.startswith(".."):
+            header_name = os.path.basename(abs_path)
+        else:
+            header_name = computed_rel_path
+
+        header_name = header_name.replace("\\", "/")
     
     # Prepend destination directory if provided
     if dest_dir:

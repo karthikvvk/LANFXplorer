@@ -439,16 +439,32 @@ def send_files():
 
     port = env.get("port") or 4433
 
-    # verify files exist
-    valid_files = []
+    # verify files exist and expand directories
+    # Phase 1: Build tree structure — walk directories recursively
+    valid_files = []        # Regular files (abs_path only)
+    folder_file_map = []    # Folder contents: list of (abs_path, rel_path) tuples
     missing = []
     for f in files:
         if os.path.isfile(f):
             valid_files.append(f)
+        elif os.path.isdir(f):
+            # Walk directory recursively and collect all files
+            folder_name = os.path.basename(f)
+            parent_dir = os.path.dirname(f)
+            print(f"[send_files] Walking directory: {f} (folder_name={folder_name})")
+            for dirpath, dirnames, filenames in os.walk(f):
+                for fname in filenames:
+                    abs_file = os.path.join(dirpath, fname)
+                    # Preserve path relative to parent of the selected folder
+                    # e.g. /home/user/Lanfxplorer/myfolder/sub/file.txt
+                    #   -> myfolder/sub/file.txt
+                    rel_file = os.path.relpath(abs_file, parent_dir)
+                    folder_file_map.append((abs_file, rel_file))
+            print(f"[send_files] Directory {folder_name}: found {len([m for m in folder_file_map if m[1].startswith(folder_name)])} files")
         else:
             missing.append(f)
 
-    if not valid_files:
+    if not valid_files and not folder_file_map:
         return jsonify({"status": "error", "message": "no valid files to send", "missing": missing}), 400
 
     # ========== PATH RESTRICTION CHECK ==========
@@ -461,11 +477,21 @@ def send_files():
                 "status": "error",
                 "message": error_msg
             }), 403
+    for abs_path, rel_path in folder_file_map:
+        is_valid, error_msg = validate_path_access(abs_path)
+        if not is_valid:
+            print(f"[!] Send files access denied (folder content): {error_msg}")
+            return jsonify({
+                "status": "error",
+                "message": error_msg
+            }), 403
     # =============================================
 
-    # Create task for tracking
+    # Build combined file list for task tracking
+    all_file_paths = valid_files + [abs_p for abs_p, _ in folder_file_map]
 
-    task_id = _create_transfer_task(valid_files, remote_host, "send")
+    # Create task for tracking
+    task_id = _create_transfer_task(all_file_paths, remote_host, "send")
     
     def _do_send_background():
         """Background thread to perform the actual transfer."""
@@ -475,7 +501,8 @@ def send_files():
             ca_cert = env.get("CA_CERT") or env.get("ca_cert")
 
             print(f"[send_files] Starting background transfer to {remote_host}:{port}")
-            print(f"[send_files] Files: {valid_files}")
+            print(f"[send_files] Regular files: {valid_files}")
+            print(f"[send_files] Folder files: {len(folder_file_map)} files from directories")
             print(f"[send_files] dest_dir: {dest_dir}")
             print(f"[send_files] CA cert: {ca_cert}")
             print(f"[send_files] Client cert: {client_cert}")
@@ -499,13 +526,14 @@ def send_files():
                 )
                 print(f"[send_files] QUIC connection established!")
                 try:
-                    # Calculate total size for all files
+                    # Calculate total size for all files (regular + folder contents)
                     total_size = sum(os.path.getsize(f) for f in valid_files)
+                    total_size += sum(os.path.getsize(abs_p) for abs_p, _ in folder_file_map)
                     bytes_sent_total = 0
                     
+                    # Phase 2a: Send regular files (no relative path override)
                     for path in valid_files:
                         print(f"[send_files] Sending file: {path}")
-                        # Update current file in task
                         with _transfer_lock:
                             if task_id in _transfer_tasks:
                                 _transfer_tasks[task_id]["current_file"] = path
@@ -520,6 +548,24 @@ def send_files():
                         await send_file_with_progress(conn, path, on_progress, dest_dir=dest_dir)
                         bytes_sent_total += file_size
                         print(f"[send_files] File sent successfully: {path}")
+                    
+                    # Phase 2b: Send folder files with relative path preservation
+                    for abs_path, rel_path in folder_file_map:
+                        print(f"[send_files] Sending folder file: {abs_path} (rel={rel_path})")
+                        with _transfer_lock:
+                            if task_id in _transfer_tasks:
+                                _transfer_tasks[task_id]["current_file"] = abs_path
+                        
+                        file_size = os.path.getsize(abs_path)
+                        
+                        def on_progress(bytes_sent_file):
+                            nonlocal bytes_sent_total
+                            current_total = bytes_sent_total + bytes_sent_file
+                            _update_transfer_progress(task_id, current_total, total_size)
+                        
+                        await send_file_with_progress(conn, abs_path, on_progress, dest_dir=dest_dir, rel_path=rel_path)
+                        bytes_sent_total += file_size
+                        print(f"[send_files] Folder file sent successfully: {rel_path}")
                     
                     print(f"[send_files] All files sent, marking task complete")
                     _complete_transfer_task(task_id, True)
@@ -546,7 +592,7 @@ def send_files():
         "task_id": task_id,
         "remote_host": remote_host,
         "port": port,
-        "files": valid_files,
+        "files": all_file_paths,
         "missing": missing
     }), 202  # 202 Accepted
 
