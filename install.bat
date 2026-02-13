@@ -1,5 +1,6 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal
+chcp 65001 >nul 2>&1
 
 REM ===============================
 REM Set console title and banner
@@ -70,15 +71,15 @@ if not exist "%PY_DIR%\python.exe" (
     )
 
 ) else (
-    echo [✓] Python already present
+    echo [OK] Python already present
 )
 
 REM ===============================
-REM OpenSSL 3.5 LTS (System Installation)  
+REM OpenSSL 3.5 LTS (System Installation)
 REM ===============================
 set "SYSTEM_SSL_PATH=C:\Program Files\OpenSSL-Win64\bin\openssl.exe"
 if not exist "%SYSTEM_SSL_PATH%" (
-    echo [+] Installing OpenSSL 3.5.4 LTS to system (Program Files)
+    echo [+] Installing OpenSSL 3.5.5 LTS to system (Program Files)
     echo.
     echo IMPORTANT: The OpenSSL installer will open in a new window.
     echo You MUST accept the license agreement to continue installation.
@@ -89,7 +90,7 @@ if not exist "%SYSTEM_SSL_PATH%" (
 
     set "DOWNLOAD_PATH=%USERPROFILE%\Downloads\openssl_installer.exe"
     
-    powershell -Command "Invoke-WebRequest -Uri 'https://slproweb.com/download/Win64OpenSSL_Light-3_5_4.exe' -OutFile '%DOWNLOAD_PATH%'" && (
+    powershell -Command "Invoke-WebRequest -Uri 'https://slproweb.com/download/Win64OpenSSL_Light-3_5_5.exe' -OutFile '%DOWNLOAD_PATH%'" && (
         echo [+] OpenSSL installer downloaded to Downloads folder
     ) || (
         echo [ERROR] Failed to download OpenSSL installer
@@ -120,35 +121,31 @@ if not exist "%SYSTEM_SSL_PATH%" (
         exit /b 1
     )
 ) else (
-    echo [✓] OpenSSL already installed at C:\Program Files\OpenSSL-Win64
+    echo [OK] OpenSSL already installed at C:\Program Files\OpenSSL-Win64
 )
 
 REM ===============================
 REM pip + requirements
 REM ===============================
 echo [+] Installing Python dependencies
-"%PY_DIR%\python.exe" -m pip install --upgrade pip && (
+"%PY_DIR%\python.exe" -m pip install --no-warn-script-location --upgrade pip && (
     echo [+] pip upgrade complete
 ) || (
     echo [ERROR] Failed to upgrade pip
     exit /b 1
 )
 
-"%PY_DIR%\python.exe" -m pip install -r "%APP_DIR%\requirements.txt" && (
+"%PY_DIR%\python.exe" -m pip install --no-warn-script-location -r "%APP_DIR%\requirements.txt" && (
     echo [+] Dependencies installation complete
 ) || (
     echo [ERROR] Failed to install dependencies
     exit /b 1
 )
 
-REM Reinstall cryptography to ensure it uses system OpenSSL
-echo [+] Reinstalling cryptography package for system OpenSSL compatibility
-"%PY_DIR%\python.exe" -m pip uninstall -y cryptography
-"%PY_DIR%\python.exe" -m pip install --no-cache-dir cryptography && (
-    echo [+] Cryptography package reinstalled successfully
-) || (
-    echo [ERROR] Failed to reinstall cryptography package
-    exit /b 1
+REM Verify cryptography package is installed correctly
+echo [+] Verifying cryptography package
+"%PY_DIR%\python.exe" -c "import cryptography; print('[OK] cryptography', cryptography.__version__)" || (
+    echo [WARNING] cryptography package may not be installed correctly
 )
 
 REM ===============================
@@ -167,10 +164,10 @@ type nul > "%APP_DIR%\.installed"
 
 echo.
 echo ================================================
-echo [✓] Installation completed successfully!
+echo [OK] Installation completed successfully!
 echo ================================================
 echo    Python 3.9.1: %PY_DIR%
-echo    OpenSSL 3.5.4 LTS: C:\Program Files\OpenSSL-Win64
+echo    OpenSSL 3.5.5 LTS: C:\Program Files\OpenSSL-Win64
 echo    Desktop shortcut created
 echo ================================================
 echo.
@@ -178,14 +175,3 @@ echo.
 pause
 exit /b 0
 
-:error
-echo.
-echo ================================================
-echo [!] Installation failed!
-echo ================================================
-echo Please check the error messages above.
-echo You may need to run this script again.
-echo ================================================
-echo.
-pause
-exit /b 1
