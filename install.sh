@@ -35,6 +35,19 @@ fi
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="$APP_DIR/.env"
 
+# Guard: autoconf/make cannot handle spaces in paths
+case "$APP_DIR" in
+  *" "*)
+    echo "[✗] ERROR: Installation path contains spaces:"
+    echo "    $APP_DIR"
+    echo ""
+    echo "    Autoconf/make build systems do not support spaces in paths."
+    echo "    Please move/extract LANFXplorer to a path without spaces, e.g.:"
+    echo "    /home/$(whoami)/LANFXplorer"
+    exit 1
+    ;;
+esac
+
 # -------------------------------
 # Load .env safely
 # -------------------------------

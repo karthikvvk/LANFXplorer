@@ -46,7 +46,7 @@ LANFXplorer/
 .pub-cache/
 .pub/
 /build/
-
+# lanfXplorer
 # Symbolication related
 app.*.symbols
 
@@ -62,3 +62,4 @@ app.*.map.json
 *.hologram.dart
 *.tar*
 *.zip*
+/virtual/
