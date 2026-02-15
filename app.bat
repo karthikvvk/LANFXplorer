@@ -31,9 +31,14 @@ if not exist "%PYTHON_EXE%" (
 echo [*] Using Python: %PYTHON_EXE%
 
 REM Set up environment for embedded Python
-set "PYTHONHOME=%PY_PREFIX%"
+REM NOTE: Do NOT set PYTHONHOME - embedded Python uses ._pth files for path config
+REM Setting PYTHONHOME breaks DLL loading for native extensions like cryptography
 set "PYTHONPATH=%APP_DIR%"
-set "PATH=%PY_PREFIX%;%PY_PREFIX%\Scripts;C:\Program Files\OpenSSL-Win64;C:\Program Files\OpenSSL-Win64\bin;%PATH%"
+set "PATH=%PY_PREFIX%;%PY_PREFIX%\Scripts;%PATH%"
+
+REM Make system OpenSSL CLI available via env var (but NOT on PATH to avoid DLL conflicts)
+REM The cryptography package bundles its own OpenSSL DLLs - system OpenSSL on PATH causes version mismatch
+set "OPENSSL_PATH=C:\Program Files\OpenSSL-Win64\bin\openssl.exe"
 
 REM Run the main application
 "%PYTHON_EXE%" "%APP_DIR%\main.py"

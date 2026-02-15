@@ -250,7 +250,17 @@ def write_env(installer=False):
     detect_interface()
     ls = os.listdir(pwd)
     if "key.pem" not in ls or "cert.pem" not in ls:
-        os.system("""openssl req -x509 -nodes -newkey rsa:2048 -keyout key.pem -out cert.pem  -days 365 -subj "/CN=quic-server.local\"""")
+        # Use full path to openssl on Windows to avoid DLL conflicts with cryptography package
+        if platform.system().lower().startswith("win"):
+            openssl_exe = os.environ.get("OPENSSL_PATH", r"C:\Program Files\OpenSSL-Win64\bin\openssl.exe")
+            subprocess.run([
+                openssl_exe, "req", "-x509", "-nodes",
+                "-newkey", "rsa:2048",
+                "-keyout", "key.pem", "-out", "cert.pem",
+                "-days", "365", "-subj", "/CN=quic-server.local"
+            ])
+        else:
+            os.system("""openssl req -x509 -nodes -newkey rsa:2048 -keyout key.pem -out cert.pem  -days 365 -subj "/CN=quic-server.local\"""")
     get_network_info()
     
     # Ensure Lanfxplorer directory exists and use it for OUTDIR/SRCDIR
