@@ -60,8 +60,13 @@ def verify_cert_validity(cert_pem: Union[str, bytes]) -> bool:
         # Handle both naive and aware datetimes from cryptography
         nvb = cert.not_valid_before_utc if hasattr(cert, "not_valid_before_utc") else cert.not_valid_before.replace(tzinfo=timezone.utc)
         nva = cert.not_valid_after_utc if hasattr(cert, "not_valid_after_utc") else cert.not_valid_after.replace(tzinfo=timezone.utc)
-        return nvb <= now <= nva
-    except Exception:
+        
+        is_valid = nvb <= now <= nva
+        if not is_valid:
+            print(f"[pki] Cert validation failed: NOW={now} vs VALID={nvb} to {nva}")
+        return is_valid
+    except Exception as e:
+        print(f"[pki] Cert validation error: {e}")
         return False
 
 
