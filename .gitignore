@@ -63,3 +63,4 @@ app.*.map.json
 *.tar*
 *.zip*
 /virtual/
+*.html

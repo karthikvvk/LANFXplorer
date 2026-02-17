@@ -29,6 +29,8 @@ except:
 ITEMS = [
     "analysis_options.yaml",
     "pki",
+    "cli_profile.py",
+    "logout.py",
     "api_bridge.py",
     "pubspec.lock",
     "app.sh",

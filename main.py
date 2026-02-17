@@ -192,6 +192,13 @@ def run_ui():
 def main():
     processes = []
     
+    # Headless / 32-bit: interactive CLI profile creation before anything else
+    if os.environ.get("LANFXPLORER_HEADLESS"):
+        from cli_profile import ensure_profile
+        if not ensure_profile():
+            print_status("fail", "Profile creation cancelled — exiting")
+            return
+    
     # Kill any existing processes using our ports to prevent 'address already in use'
     print_status("info", "Cleaning up existing services...")
     cleanup_existing_services()
