@@ -31,7 +31,7 @@ from path_security import (
 
 app = Flask(__name__)
 
-CHUNK_SIZE = 64 * 1024
+CHUNK_SIZE = 64 * 1024  # Default; overridden at runtime by _get_dynamic_chunk_size()
 ENV_FILE = ".env"
 # CORS(app, resources={r"/*": {"origins":"*"}})
 
@@ -39,7 +39,7 @@ ENV_FILE = ".env"
 import uuid
 import time
 from threading import Lock
-from wifi_speed import estimate_transfer_time_seconds, get_wifi_speed
+from wifi_speed import estimate_transfer_time_seconds, get_wifi_speed, calculate_optimal_chunk_size
 
 # ==================== PATH RESTRICTION HELPERS ====================
 # Path security functions imported from path_security module
@@ -64,7 +64,7 @@ _wifi_speed_mbps = None
 
 def _get_cached_wifi_speed():
     """Get cached WiFi speed or detect it."""
-    global _wifi_speed_mbps
+    global _wifi_speed_mbps, CHUNK_SIZE
     if _wifi_speed_mbps is None:
         _wifi_speed_mbps = get_wifi_speed()
         if _wifi_speed_mbps:
@@ -72,6 +72,8 @@ def _get_cached_wifi_speed():
         else:
             print("[wifi_speed] Could not detect, using fallback 100 Mbps")
             _wifi_speed_mbps = 100  # Fallback
+        CHUNK_SIZE = calculate_optimal_chunk_size(_wifi_speed_mbps)
+        print(f"[wifi_speed] Dynamic chunk size: {CHUNK_SIZE // 1024} KB")
     return _wifi_speed_mbps
 
 

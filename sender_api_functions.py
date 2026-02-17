@@ -7,6 +7,7 @@ from typing import Optional
 from aioquic.asyncio import connect as _quic_connect
 from aioquic.quic.configuration import QuicConfiguration
 from pki.utils import fingerprint_pem, load_cert_pem
+from wifi_speed import calculate_optimal_chunk_size
 
 
 @dataclass
@@ -101,11 +102,12 @@ async def send_file(connection: QuicSenderConnection, file_path: str) -> None:
     header = _build_header(header_name, filesize)
 
     reader, writer = await connection.protocol.create_stream()
+    chunk_size = calculate_optimal_chunk_size()
 
     writer.write(header)
     with open(abs_path, "rb") as f:
         while True:
-            chunk = f.read(65536)
+            chunk = f.read(chunk_size)
             if not chunk:
                 break
             writer.write(chunk)
@@ -183,13 +185,14 @@ async def send_file_with_progress(
     header = _build_header(header_name, filesize)
 
     reader, writer = await connection.protocol.create_stream()
+    chunk_size = calculate_optimal_chunk_size()
 
     writer.write(header)
     bytes_sent = 0
     
     with open(abs_path, "rb") as f:
         while True:
-            chunk = f.read(65536)
+            chunk = f.read(chunk_size)
             if not chunk:
                 break
             writer.write(chunk)

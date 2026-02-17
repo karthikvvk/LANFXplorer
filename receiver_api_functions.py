@@ -19,6 +19,7 @@ from aioquic.quic.configuration import QuicConfiguration
 from pki.store import PeerStore
 from pki.utils import fingerprint_pem, verify_cert_validity, get_peer_cert_pem_from_writer
 from path_security import validate_path_access, get_lanfxplorer_root
+from wifi_speed import calculate_optimal_chunk_size
 
 
 OnFileReceivedCallback = Callable[[str, int], object]
@@ -244,9 +245,10 @@ async def _handle_stream(
             os.makedirs(parent_dir, exist_ok=True)
         
         bytes_written = 0
+        chunk_size = calculate_optimal_chunk_size()
         with open(path, "wb") as f:
             while True:
-                chunk = await reader.read(65536)
+                chunk = await reader.read(chunk_size)
                 if not chunk:
                     break
                 f.write(chunk)

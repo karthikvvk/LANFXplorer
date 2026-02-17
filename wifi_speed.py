@@ -94,6 +94,35 @@ def get_wifi_speed():
         return None
 
 
+def calculate_optimal_chunk_size(speed_mbps: float = None) -> int:
+    """
+    Calculate optimal chunk size for file transfers based on negotiated WiFi speed.
+    
+    Larger chunks reduce per-chunk overhead and better utilise fast links.
+    Smaller chunks keep memory usage low on slow connections.
+    
+    Args:
+        speed_mbps: Negotiated WiFi speed in Mbps, or None to auto-detect.
+        
+    Returns:
+        Chunk size in bytes.
+    """
+    if speed_mbps is None:
+        speed_mbps = get_wifi_speed()
+    
+    if speed_mbps is None or speed_mbps <= 0:
+        return 64 * 1024  # 64 KB fallback
+    
+    if speed_mbps <= 50:
+        return 64 * 1024       # 64 KB  — slow link
+    elif speed_mbps <= 150:
+        return 256 * 1024      # 256 KB — standard WiFi (802.11n)
+    elif speed_mbps <= 500:
+        return 512 * 1024      # 512 KB — fast WiFi (802.11ac)
+    else:
+        return 1024 * 1024     # 1 MB   — very fast WiFi / Ethernet
+
+
 def estimate_transfer_time_seconds(file_size_bytes: int, speed_mbps: float = None) -> float:
     """
     Estimate transfer time in seconds based on file size and WiFi speed.
@@ -130,11 +159,14 @@ if __name__ == "__main__":
     speed = get_wifi_speed()
     if speed:
         print(f"WiFi Speed: {speed} Mbps")
-        print(f"Effective (90%): {speed * 0.9:.1f} Mbps")
+        print(f"Effective (90%): {float(speed) * 0.9:.1f} Mbps")
+        
+        chunk = calculate_optimal_chunk_size(float(speed))
+        print(f"Optimal chunk size: {chunk // 1024} KB")
         
         # Example: estimate 1GB transfer
         gb_size = 1 * 1024 * 1024 * 1024
-        time_sec = estimate_transfer_time_seconds(gb_size, speed)
+        time_sec = estimate_transfer_time_seconds(gb_size, float(speed))
         print(f"Estimated 1GB transfer time: {time_sec:.1f} seconds ({time_sec/60:.1f} minutes)")
     else:
         print("Could not detect WiFi speed", file=sys.stderr)
