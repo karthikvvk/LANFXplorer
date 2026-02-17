@@ -11,7 +11,24 @@ import threading
 import time
 from typing import Dict, Optional
 
-import bcrypt
+try:
+    # 32bittesting is not a valid package name, so we add it to path to import module directly
+    import sys
+    import os
+    _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _test_dir = os.path.join(_root, "32bittesting")
+    if _test_dir not in sys.path:
+        sys.path.append(_test_dir)
+    import bcrypt_compat
+    hashpw = bcrypt_compat.hashpw
+    checkpw = bcrypt_compat.checkpw
+    gensalt = bcrypt_compat.gensalt
+except ImportError:
+    # Fallback to standard bcrypt (64-bit / normal install)
+    import bcrypt
+    hashpw = bcrypt.hashpw
+    checkpw = bcrypt.checkpw
+    gensalt = bcrypt.gensalt
 from cryptography.fernet import Fernet
 
 from .utils import fingerprint_pem, load_cert_pem

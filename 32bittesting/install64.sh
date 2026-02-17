@@ -2,10 +2,10 @@
 set -e
 
 # =================================
-# Terminal Detection & Re-launch
-# If not running in a terminal (e.g., double-clicked from GUI),
-# re-launch the script inside a terminal emulator
+# LANFXplorer — Linux 64-bit (x86_64) Installer
 # =================================
+
+# Terminal Detection & Re-launch
 if [ ! -t 0 ] && [ -z "$LANFXPLORER_IN_TERMINAL" ]; then
   SCRIPT_PATH="$(readlink -f "$0")"
   TERMINAL_CMD=""
@@ -32,7 +32,8 @@ if [ ! -t 0 ] && [ -z "$LANFXPLORER_IN_TERMINAL" ]; then
   fi
 fi
 
-APP_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+TESTING_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="$APP_DIR/.env"
 
 # Guard: autoconf/make cannot handle spaces in paths
@@ -42,20 +43,35 @@ case "$APP_DIR" in
     echo "    $APP_DIR"
     echo ""
     echo "    Autoconf/make build systems do not support spaces in paths."
-    echo "    Please move/extract LANFXplorer to a path without spaces, e.g.:"
-    echo "    /home/$(whoami)/LANFXplorer"
+    echo "    Please move/extract LANFXplorer to a path without spaces."
     exit 1
     ;;
 esac
 
-# -------------------------------
-# Load .env safely
-# -------------------------------
+# Load .env
 if [ -f "$ENV_FILE" ]; then
   set -a
   source "$ENV_FILE"
   set +a
 fi
+
+# ===============================
+# 64-bit specific versions
+# ===============================
+OPENSSL_VERSION="3.2.1"
+PYTHON_VERSION="3.12.8"
+SSL_TARGET="linux-x86_64"
+
+OPT_DIR="$APP_DIR/opt"
+OPENSSL_SRC="$OPT_DIR/openssl-src"
+OPENSSL_PREFIX="$OPT_DIR/openssl"
+
+PYTHON_SRC="$OPT_DIR/python-src"
+PY_PREFIX="$OPT_DIR/python39"
+
+NPROC="$(nproc || echo 1)"
+
+mkdir -p "$OPT_DIR"
 
 # ===============================
 # Install build dependencies
@@ -97,7 +113,6 @@ install_deps() {
   fi
 }
 
-# Only install if any dependency is missing
 MISSING=""
 for dep in $DEPS; do
   if ! command -v "$dep" >/dev/null 2>&1; then
@@ -112,34 +127,18 @@ else
   echo "[✓] All build dependencies already present"
 fi
 
+# If already installed → run app
 INSTALLER_FLAG="${INSTALLER:-false}"
 INSTALLER_FLAG="$(echo "$INSTALLER_FLAG" | tr '[:upper:]' '[:lower:]')"
 
-# -------------------------------
-# If already installed → run app
-# -------------------------------
 if [ "$INSTALLER_FLAG" = "true" ]; then
   exec "$APP_DIR/app.sh"
 fi
 
-OPENSSL_VERSION="3.2.1"
-PYTHON_VERSION="3.12.8"
-
-OPT_DIR="$APP_DIR/opt"
-OPENSSL_SRC="$OPT_DIR/openssl-src"
-OPENSSL_PREFIX="$OPT_DIR/openssl"
-
-PYTHON_SRC="$OPT_DIR/python-src"
-PY_PREFIX="$OPT_DIR/python39"
-
-NPROC="$(nproc || echo 1)"
-
-mkdir -p "$OPT_DIR"
-
 # ===============================
-# Build OpenSSL (standalone)
+# Build OpenSSL (64-bit)
 # ===============================
-echo "[+] Building OpenSSL $OPENSSL_VERSION"
+echo "[+] Building OpenSSL $OPENSSL_VERSION (64-bit: $SSL_TARGET)"
 
 mkdir -p "$OPENSSL_SRC"
 cd "$OPENSSL_SRC"
@@ -151,7 +150,7 @@ fi
 
 cd "openssl-$OPENSSL_VERSION"
 
-./Configure linux-x86_64 \
+./Configure "$SSL_TARGET" \
   --prefix="$OPENSSL_PREFIX" \
   --openssldir="$OPENSSL_PREFIX/ssl" \
   shared
@@ -159,7 +158,7 @@ cd "openssl-$OPENSSL_VERSION"
 make -j"$NPROC"
 make install_sw
 
-# Detect lib vs lib64 for OpenSSL
+# Detect lib vs lib64
 if [ -d "$OPENSSL_PREFIX/lib64" ] && [ ! -d "$OPENSSL_PREFIX/lib" ]; then
   OPENSSL_LIB="$OPENSSL_PREFIX/lib64"
 else
@@ -168,9 +167,9 @@ fi
 echo "[✓] OpenSSL libraries at: $OPENSSL_LIB"
 
 # ===============================
-# Build Python 3.9.1 (standalone)
+# Build Python (64-bit)
 # ===============================
-echo "[+] Building Python $PYTHON_VERSION"
+echo "[+] Building Python $PYTHON_VERSION (64-bit)"
 
 mkdir -p "$PYTHON_SRC"
 cd "$PYTHON_SRC"
@@ -196,7 +195,7 @@ export PKG_CONFIG_PATH="$OPENSSL_LIB/pkgconfig"
 make -j"$NPROC"
 make install
 
-# Verify SSL module compiled
+# Verify SSL module
 echo "[+] Verifying SSL module..."
 export LD_LIBRARY_PATH="$OPENSSL_LIB:$LD_LIBRARY_PATH"
 "$PY_PREFIX/bin/python3" -c "import ssl; print('[✓] SSL module OK: ' + ssl.OPENSSL_VERSION)" || {
@@ -207,13 +206,13 @@ export LD_LIBRARY_PATH="$OPENSSL_LIB:$LD_LIBRARY_PATH"
 }
 
 # ===============================
-# pip + requirements
+# pip + 64-bit requirements
 # ===============================
-echo "[+] Installing pip + dependencies"
+echo "[+] Installing pip + 64-bit dependencies"
 
 "$PY_PREFIX/bin/python3" -m ensurepip
 "$PY_PREFIX/bin/python3" -m pip install --upgrade pip
-"$PY_PREFIX/bin/python3" -m pip install -r "$APP_DIR/requirements.txt"
+"$PY_PREFIX/bin/python3" -m pip install -r "$TESTING_DIR/requirements_64.txt"
 
 # ===============================
 # Runtime directories
@@ -239,17 +238,19 @@ EOF
 chmod +x "$DESKTOP_FILE"
 touch "$APP_DIR/.installed"
 
-# ===============================
-# Mark installation as complete
-# ===============================
+# Mark install complete
 if grep -q "^INSTALLER=" "$ENV_FILE"; then
   sed -i "s/^INSTALLER=.*/INSTALLER='true'/" "$ENV_FILE"
 else
   echo "INSTALLER='true'" >> "$ENV_FILE"
 fi
 
-echo "[✓] Installation complete"
+echo ""
+echo "================================================"
+echo "[✓] 64-bit Installation complete"
+echo "    Python: $PYTHON_VERSION (64-bit)"
+echo "    OpenSSL: $OPENSSL_VERSION ($SSL_TARGET)"
+echo "================================================"
 
-
-chmod +x app.sh
-./app.sh
+chmod +x "$APP_DIR/app.sh"
+"$APP_DIR/app.sh"

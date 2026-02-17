@@ -5,8 +5,8 @@ flask
 python-dotenv
 elevate
 scapy
-ownca
-cryptography
+# NOTE: ownca removed — requires cryptography<35, incompatible with aioquic>=42
+cryptography>=42.0,<46.0
 pyOpenSSL
 service-identity
 bcrypt

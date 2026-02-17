@@ -154,6 +154,12 @@ def run_script(script_name: str, wait: bool = True):
 
 
 def run_ui():
+    # Headless mode (set by app_32bit.sh / app_32bit.bat)
+    if os.environ.get("LANFXPLORER_HEADLESS"):
+        print_status("info", "Headless mode — UI skipped")
+        print_status("info", "Backend running. Access API at http://localhost:5000")
+        return None
+
     # Platform-specific UI paths, with debug (development) fallback
     if platform.system().lower() == "windows":
         ui_path = APP_DIR / "build" / "windows" / "x64" / "runner" / "Release" / "lanfxplorer.exe"
@@ -166,8 +172,21 @@ def run_ui():
     if not os.path.exists(ui_path):
         print_status("fail", f"UI executable not found: {ui_path}")
         return None
+
+    # Check architecture compatibility (Flutter UI is x64 only)
+    import struct
+    if struct.calcsize("P") * 8 == 32:
+        print_status("warn", "UI binary is x64 — skipping on 32-bit system")
+        print_status("info", "Backend running headless. Access API at http://localhost:5000")
+        return None
+
     print_status("run", "Starting LANFXplorer UI")
-    return subprocess.Popen([str(ui_path)], cwd=str(APP_DIR))
+    try:
+        return subprocess.Popen([str(ui_path)], cwd=str(APP_DIR))
+    except OSError as e:
+        print_status("warn", f"Cannot launch UI: {e}")
+        print_status("info", "Backend running headless. Access API at http://localhost:5000")
+        return None
 
 
 def main():
@@ -198,11 +217,17 @@ def main():
     time.sleep(2)
 
     ui_proc = run_ui()
-    if not ui_proc:
-        return
-    processes.append(("UI", ui_proc))
-
-    ui_proc.wait()
+    if ui_proc:
+        processes.append(("UI", ui_proc))
+        ui_proc.wait()
+    else:
+        # No UI (32-bit or missing binary) — run headless, wait for Ctrl+C
+        print_status("info", "Running in headless mode. Press Ctrl+C to stop.")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print_status("info", "Shutdown requested")
 
     # except KeyboardInterrupt:
     #     print_status("info", "Shutdown requested")

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-set -e
+# =================================================
+# LANFXplorer — 32-bit Headless Launcher
+# No Flutter UI — runs backend services only
+# =================================================
 
-# =================================================
-# LANFXplorer — Unified Application Launcher
-# Supports 64-bit (with UI) & 32-bit (headless)
-# =================================================
+set -e
 
 # -------------------------------------------------
 # Usage / Help
@@ -18,14 +18,12 @@ Options:
   -n, --name     NAME       Set device/user display name (default: \$USER)
   -o, --outdir   PATH       Set file receive directory (default: ~/Lanfxplorer)
   -P, --port     PORT       Set QUIC port (default: 4433)
-      --headless            Force headless mode (no UI, even on 64-bit)
   -h, --help                Show this help
 
 Examples:
-  $0                            # Normal launch (UI on 64-bit, headless on 32-bit)
-  $0 --password mypass123       # Set password via CLI
-  $0 -p secret -n "MyPC"       # Password + custom name
-  $0 --headless -p pass123     # Force headless on any arch
+  $0 --password mypass123
+  $0 -p secret -n "OldLaptop" -o /tmp/received
+  $0                          # Uses all defaults (no password)
 HELP
   exit 0
 }
@@ -37,24 +35,22 @@ CLI_PASSWORD=""
 CLI_NAME=""
 CLI_OUTDIR=""
 CLI_PORT=""
-FORCE_HEADLESS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    -p|--password)  CLI_PASSWORD="$2"; shift 2 ;;
-    -n|--name)      CLI_NAME="$2";     shift 2 ;;
-    -o|--outdir)    CLI_OUTDIR="$2";   shift 2 ;;
-    -P|--port)      CLI_PORT="$2";     shift 2 ;;
-    --headless)     FORCE_HEADLESS=1;  shift ;;
-    -h|--help)      usage ;;
-    *)              echo "[!] Unknown option: $1"; usage ;;
+    -p|--password) CLI_PASSWORD="$2"; shift 2 ;;
+    -n|--name)     CLI_NAME="$2";     shift 2 ;;
+    -o|--outdir)   CLI_OUTDIR="$2";   shift 2 ;;
+    -P|--port)     CLI_PORT="$2";     shift 2 ;;
+    -h|--help)     usage ;;
+    *)             echo "[!] Unknown option: $1"; usage ;;
   esac
 done
 
 # -------------------------------------------------
 # Resolve paths
 # -------------------------------------------------
-APP_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 OPENSSL_PREFIX="$APP_DIR/opt/openssl"
 PY_PREFIX="$APP_DIR/opt/python39"
@@ -74,69 +70,65 @@ export LD_LIBRARY_PATH="$OPENSSL_LIB:$PY_PREFIX/lib:$LD_LIBRARY_PATH"
 export PYTHONHOME="$PY_PREFIX"
 export PYTHONPATH="$APP_DIR"
 
-# Source Rust/Cargo if available (needed for some pip builds on 32-bit)
-if [ -f "$HOME/.cargo/env" ]; then
-  source "$HOME/.cargo/env"
+# Verify Python exists
+if [ ! -x "$PY_PREFIX/bin/python3" ]; then
+  echo "[✗] Python not found at: $PY_PREFIX/bin/python3"
+  echo "    Run 32bittesting/install32.sh first."
+  exit 1
 fi
 
 # -------------------------------------------------
-# Architecture auto-detection
+# Force headless mode (skip UI in main.py)
 # -------------------------------------------------
-HOST_ARCH="$(uname -m)"
-ARCH_BITS=64
-if [ "$HOST_ARCH" = "i686" ] || [ "$HOST_ARCH" = "i386" ]; then
-  ARCH_BITS=32
-  # 32-bit: force headless (Flutter UI is x64 only)
-  FORCE_HEADLESS=1
-  # Point Rust to our custom OpenSSL (for pip rebuilds)
-  export OPENSSL_DIR="$OPENSSL_PREFIX"
-  export OPENSSL_LIB_DIR="$OPENSSL_LIB"
-  export OPENSSL_INCLUDE_DIR="$OPENSSL_PREFIX/include"
-  export CARGO_BUILD_TARGET=i686-unknown-linux-gnu
-fi
+export LANFXPLORER_HEADLESS=1
 
 # -------------------------------------------------
 # Apply CLI overrides as environment variables
 # -------------------------------------------------
-if [ -n "$FORCE_HEADLESS" ]; then
-  export LANFXPLORER_HEADLESS=1
-fi
 
+# Password → set via config_manager (keyring/env fallback)
 if [ -n "$CLI_PASSWORD" ]; then
+  echo "[+] Setting password from CLI"
   export PASSWORD="$CLI_PASSWORD"
 fi
 
+# Device name
 if [ -n "$CLI_NAME" ]; then
+  echo "[+] Device name: $CLI_NAME"
   export USER="$CLI_NAME"
 fi
 
+# Output directory
 if [ -n "$CLI_OUTDIR" ]; then
   mkdir -p "$CLI_OUTDIR"
+  echo "[+] Output directory: $CLI_OUTDIR"
   export OUTDIR="$CLI_OUTDIR"
   export SRCDIR="$CLI_OUTDIR"
 fi
 
+# Port
 if [ -n "$CLI_PORT" ]; then
+  echo "[+] QUIC port: $CLI_PORT"
   export PORT="$CLI_PORT"
 fi
 
 # -------------------------------------------------
-# Config summary (only when CLI args are used)
+# Show config summary
 # -------------------------------------------------
-if [ -n "$CLI_PASSWORD" ] || [ -n "$CLI_NAME" ] || [ -n "$CLI_OUTDIR" ] || [ -n "$CLI_PORT" ] || [ -n "$FORCE_HEADLESS" ]; then
-  echo ""
-  echo "================================================"
-  echo "  LANFXplorer (${ARCH_BITS}-bit${FORCE_HEADLESS:+ — headless})"
-  echo "================================================"
-  [ -n "$CLI_PASSWORD" ] && echo "  Password : (set)"
-  [ -n "$CLI_NAME" ]     && echo "  Name     : $CLI_NAME"
-  [ -n "$CLI_OUTDIR" ]   && echo "  Output   : $CLI_OUTDIR"
-  [ -n "$CLI_PORT" ]     && echo "  Port     : $CLI_PORT"
-  echo "================================================"
-  echo ""
-fi
+echo ""
+echo "================================================"
+echo "  LANFXplorer 32-bit Headless Mode"
+echo "================================================"
+echo "  App dir  : $APP_DIR"
+echo "  Python   : $($PY_PREFIX/bin/python3 --version 2>&1)"
+echo "  Password : ${CLI_PASSWORD:+(set)}${CLI_PASSWORD:-(not set)}"
+echo "  Name     : ${CLI_NAME:-$USER}"
+echo "  Output   : ${CLI_OUTDIR:-~/Lanfxplorer}"
+echo "  Port     : ${CLI_PORT:-4433}"
+echo "================================================"
+echo ""
 
 # -------------------------------------------------
-# Launch
+# Launch (headless — main.py will skip UI)
 # -------------------------------------------------
 exec "$PY_PREFIX/bin/python3" "$APP_DIR/main.py"
