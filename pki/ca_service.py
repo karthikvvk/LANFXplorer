@@ -31,15 +31,34 @@ class CADiscoveryProtocol(asyncio.DatagramProtocol):
         self.is_ca = is_ca
         self.ca_manager = ca_manager
         self.transport = None
+        self._broadcast_handle = None
 
     def connection_made(self, transport):
         self.transport = transport
         if not self.is_ca:
-            # Broadcast WHO_IS_CA
-            logger.info("Broadcasting generic CA discovery request...")
+            # Start periodic broadcasts of WHO_IS_CA (every 1 second)
+            logger.info("Starting periodic CA discovery broadcasts...")
             sock = self.transport.get_extra_info('socket')
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            self.transport.sendto(DISCOVERY_MSG, ('<broadcast>', DISCOVERY_PORT))
+            self._send_broadcast()
+
+    def _send_broadcast(self):
+        """Send WHO_IS_CA and reschedule until CA is found or transport closes."""
+        if self.transport and not self.transport.is_closing():
+            try:
+                self.transport.sendto(DISCOVERY_MSG, ('<broadcast>', DISCOVERY_PORT))
+                logger.debug("Sent WHO_IS_CA broadcast")
+            except Exception:
+                pass
+            # Reschedule every 1 second
+            loop = asyncio.get_event_loop()
+            self._broadcast_handle = loop.call_later(1.0, self._send_broadcast)
+
+    def connection_lost(self, exc):
+        """Cancel periodic broadcasts when transport closes."""
+        if self._broadcast_handle:
+            self._broadcast_handle.cancel()
+            self._broadcast_handle = None
 
     def datagram_received(self, data: bytes, addr: Tuple[str, int]):
         if self.is_ca and data == DISCOVERY_MSG:
@@ -53,6 +72,10 @@ class CADiscoveryProtocol(asyncio.DatagramProtocol):
                 ca_host = parts[1]
                 ca_port = int(parts[2])
                 logger.info(f"Discovered CA at {ca_host}:{ca_port}")
+                # Stop periodic broadcasting — CA found
+                if self._broadcast_handle:
+                    self._broadcast_handle.cancel()
+                    self._broadcast_handle = None
                 asyncio.create_task(self.ca_manager.on_ca_found(ca_host, ca_port))
 
 class CASigningServer:

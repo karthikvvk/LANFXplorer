@@ -99,7 +99,7 @@ async def main() -> None:
         print("[receiver] Broadcasting 'WHO_IS_CA'...")
         
         try:
-            await asyncio.wait_for(ca_mgr.ca_found_event.wait(), timeout=5.0)
+            await asyncio.wait_for(ca_mgr.ca_found_event.wait(), timeout=10.0)
             print(f"[receiver] ✓ Found CA at {ca_mgr.ca_info}")
             
             print("[receiver] Requesting certificate signature from CA...")

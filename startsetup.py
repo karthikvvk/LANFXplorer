@@ -346,7 +346,7 @@ def setup_pki_and_write_env():
             print("    Broadcasting 'WHO_IS_CA'...")
             
             try:
-                await asyncio.wait_for(ca_mgr.ca_found_event.wait(), timeout=5.0)
+                await asyncio.wait_for(ca_mgr.ca_found_event.wait(), timeout=10.0)
                 print(f"    [+] Found CA at {ca_mgr.ca_info}")
                 client_cert, ca_cert = await ca_mgr.get_signed_cert(priv_key_pem, f"{user}@{host_ip}")
                 with open(cert_file, "wb") as f: 

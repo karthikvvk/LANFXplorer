@@ -137,6 +137,19 @@ NPROC="$(nproc || echo 1)"
 mkdir -p "$OPT_DIR"
 
 # ===============================
+# Architecture detection
+# ===============================
+HOST_ARCH="$(uname -m)"
+if [ "$HOST_ARCH" = "i686" ] || [ "$HOST_ARCH" = "i386" ]; then
+  ARCH_BITS=32
+  OPENSSL_TARGET="linux-x86"
+else
+  ARCH_BITS=64
+  OPENSSL_TARGET="linux-x86_64"
+fi
+echo "[+] Detected architecture: ${HOST_ARCH} (${ARCH_BITS}-bit)"
+
+# ===============================
 # Build OpenSSL (standalone)
 # ===============================
 echo "[+] Building OpenSSL $OPENSSL_VERSION"
@@ -151,7 +164,7 @@ fi
 
 cd "openssl-$OPENSSL_VERSION"
 
-./Configure linux-x86_64 \
+./Configure $OPENSSL_TARGET \
   --prefix="$OPENSSL_PREFIX" \
   --openssldir="$OPENSSL_PREFIX/ssl" \
   shared
