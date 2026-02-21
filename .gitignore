@@ -64,3 +64,4 @@ app.*.map.json
 *.zip*
 /virtual/
 *.html
+Notes.md

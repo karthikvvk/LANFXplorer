@@ -261,8 +261,39 @@ def write_env(installer=False):
             ])
         else:
             os.system("""openssl req -x509 -nodes -newkey rsa:2048 -keyout key.pem -out cert.pem  -days 365 -subj "/CN=quic-server.local\"""")
-    get_network_info()
-    
+    try:
+        get_network_info()
+    except Exception:
+        # No network IP found — fall back to static IP assignment
+        print("[!] No network IP detected — assigning a static IP...")
+        from set_static_ip import assign_static_ip
+        chosen = assign_static_ip(interface_override=interface)
+        if not chosen:
+            raise RuntimeError("Could not obtain or assign a network IP")
+        # Update globals from the assigned IP
+        host_ip = chosen
+        ip_parts = list(map(int, host_ip.split('.')))
+        if ip_parts[0] == 10:
+            cidr = "8"
+            subnet = "255.0.0.0"
+        elif ip_parts[0] == 172 and 16 <= ip_parts[1] <= 31:
+            cidr = "16"
+            subnet = "255.255.0.0"
+        elif ip_parts[0] == 192 and ip_parts[1] == 168:
+            cidr = "24"
+            subnet = "255.255.255.0"
+        else:
+            cidr = "24"
+            subnet = "255.255.255.0"
+        import struct as _struct
+        ip_int = _struct.unpack("!I", socket.inet_aton(host_ip))[0]
+        subnet_int = _struct.unpack("!I", socket.inet_aton(subnet))[0]
+        network_int = ip_int & subnet_int
+        broadcast_int = network_int | (~subnet_int & 0xFFFFFFFF)
+        gateway_int = network_int + 1
+        gateway = socket.inet_ntoa(_struct.pack("!I", gateway_int))
+        broadcast_address = socket.inet_ntoa(_struct.pack("!I", broadcast_int))
+
     # Ensure Lanfxplorer directory exists and use it for OUTDIR/SRCDIR
     secure_root = ensure_lanfxplorer_directory()
     
