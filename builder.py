@@ -41,7 +41,6 @@ ITEMS = [
     "receive.py",
     "devtools_options.yaml",
     "requirements.txt",
-    "files.iml",
     "scanner.py",
     "host_selecter.py",
     "scripts",
