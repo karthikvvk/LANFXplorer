@@ -176,9 +176,21 @@ def run_ui():
     # Check architecture compatibility (Flutter UI is x64 only)
     import struct
     if struct.calcsize("P") * 8 == 32:
-        print_status("warn", "UI binary is x64 — skipping on 32-bit system")
-        print_status("info", "Backend running headless. Access API at http://localhost:5000")
-        return None
+        print_status("info", "32-bit system detected — launching Tkinter UI")
+        tkinter_script = APP_DIR / "32bitscreens" / "tkinter_app.py"
+        if tkinter_script.exists():
+            try:
+                return subprocess.Popen(
+                    [sys.executable, str(tkinter_script)],
+                    cwd=str(APP_DIR))
+            except OSError as e:
+                print_status("warn", f"Cannot launch Tkinter UI: {e}")
+                print_status("info", "Backend running headless. Access API at http://localhost:5000")
+                return None
+        else:
+            print_status("warn", "Tkinter UI not found, running headless")
+            print_status("info", "Backend running headless. Access API at http://localhost:5000")
+            return None
 
     print_status("run", "Starting LANFXplorer UI")
     try:
