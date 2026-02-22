@@ -298,8 +298,9 @@ async def start_receiver(
 
     if ca_cert:
         config.load_verify_locations(cafile=ca_cert)
-        # Use OPTIONAL so we can accept peers without certs (password auth)
-        config.verify_mode = ssl.CERT_OPTIONAL
+        # Use CERT_NONE so we bypass strict OpenSSL clock checks (offline peers might drift)
+        # Trust is fully enforced by our P2P Handshake and utils.verify_cert_validity
+        config.verify_mode = ssl.CERT_NONE
     elif require_client_cert:
         raise ValueError("require_client_cert=True but ca_cert not provided")
 

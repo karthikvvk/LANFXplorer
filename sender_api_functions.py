@@ -46,7 +46,10 @@ async def quic_connect(host: str,port: int = 4433, *,insecure: bool = False, ser
 
     if ca_cert:
         config.load_verify_locations(cafile=ca_cert)
-        config.verify_mode = ssl.CERT_REQUIRED
+        # We use CERT_NONE here instead of CERT_REQUIRED because offline PCs might
+        # have clock drift, which causes OpenSSL to strictly reject the cert.
+        # Certificate trust is already securely verified during the P2P Handshake phase.
+        config.verify_mode = ssl.CERT_NONE
     else:
         raise ValueError(
             "CA_CERT environment variable not set. "

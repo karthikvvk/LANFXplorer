@@ -1,12 +1,13 @@
 """
-WiFi Speed Detection Utility
+Link Speed Detection Utility
 
-Detects the negotiated link speed of the WiFi interface on Linux or Windows.
+Detects the negotiated link speed of the WiFi or Ethernet interface on Linux or Windows.
 Returns speed in Mbps which can be used for transfer time estimation.
 """
 import platform
 import subprocess
 import re
+from typing import Optional
 
 
 def run_cmd(cmd):
@@ -24,77 +25,175 @@ def run_cmd(cmd):
         raise RuntimeError(f"Command not found: {cmd[0]}")
 
 
-def get_linux_wifi_speed():
-    """Get WiFi speed on Linux using ip and iwconfig."""
-    # Step 1: find wlan interface using ip
-    ip_out = run_cmd(["ip", "link", "show"])
-    match = re.search(r"\d+:\s+(wlan\d+|wlp\w+):", ip_out)
+def get_linux_link_speed():
+    """Get link speed on Linux (tries WiFi first, then Ethernet)."""
+    # Try WiFi first using iwconfig
+    try:
+        ip_out = run_cmd(["ip", "link", "show"])
+        match = re.search(r"\d+:\s+(wlan\d+|wlp\w+):", ip_out)
+        
+        if match:
+            iface = match.group(1)
+            iwc_out = run_cmd(["iwconfig", iface])
+            rate = re.search(r"Bit Rate[:=]\s*([\d.]+)\s*Mb/s", iwc_out)
+            if rate:
+                bitrate = float(rate.group(1))
+                return {
+                    "interface": iface,
+                    "rx_mbps": bitrate,
+                    "tx_mbps": bitrate,
+                    "type": "wifi"
+                }
+    except Exception:
+        pass
+        
+    # Fallback: Try Ethernet by looking at active interfaces in /sys/class/net
+    try:
+        import glob
+        import os
+        for sys_path in glob.glob("/sys/class/net/*"):
+            iface = os.path.basename(sys_path)
+            # Skip loopback and wlan (already tried)
+            if iface == "lo" or iface.startswith(("wlan", "wlp", "wl")):
+                continue
+                
+            # Check if link is up
+            operstate_path = os.path.join(sys_path, "operstate")
+            if not os.path.exists(operstate_path):
+                continue
+                
+            with open(operstate_path, "r") as f:
+                state = f.read().strip()
+                
+            if state != "up" and state != "unknown": 
+                continue # 'unknown' can sometimes mean up for simple virtual eth
+                
+            # Try to read speed
+            speed_path = os.path.join(sys_path, "speed")
+            if os.path.exists(speed_path):
+                try:
+                    with open(speed_path, "r") as f:
+                        speed_str = f.read().strip()
+                        # Some drivers report -1 if speed is unknown
+                        if speed_str and int(speed_str) > 0:
+                            bitrate = float(speed_str)
+                            return {
+                                "interface": iface,
+                                "rx_mbps": bitrate,
+                                "tx_mbps": bitrate,
+                                "type": "ethernet"
+                            }
+                except Exception:
+                    continue
+    except Exception:
+        pass
+        
+    raise RuntimeError("No active network connection with detectable speed found")
 
-    if not match:
-        raise RuntimeError("No wlan interface found")
 
-    iface = match.group(1)
+def get_windows_link_speed():
+    """Get link speed on Windows (tries WiFi first, then Ethernet)."""
+    # Try WiFi first using netsh
+    try:
+        output = run_cmd(["netsh", "wlan", "show", "interfaces"])
+        if "connected" in output.lower():
+            rx = re.search(r"Receive rate \(Mbps\)\s*:\s*(\d+)", output)
+            tx = re.search(r"Transmit rate \(Mbps\)\s*:\s*(\d+)", output)
+            iface = re.search(r"Interface name\s*:\s*(.+)", output)
 
-    # Step 2: query negotiated bitrate via iwconfig
-    iwc_out = run_cmd(["iwconfig", iface])
+            if rx and tx:
+                return {
+                    "interface": iface.group(1).strip() if iface else "Wi-Fi",
+                    "rx_mbps": float(rx.group(1)),
+                    "tx_mbps": float(tx.group(1)),
+                    "type": "wifi"
+                }
+    except Exception:
+        pass
+        
+    # Ethernet Fallback: Use PowerShell to get active adapter speeds
+    try:
+        ps_cmd = 'Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Select-Object Name, LinkSpeed | ConvertTo-Json'
+        output = run_cmd(["powershell", "-Command", ps_cmd])
+        
+        # Simple parse, avoiding json module to handle edge cases where output is not strict JSON
+        import json
+        try:
+            adapters = json.loads(output)
+            if not isinstance(adapters, list):
+                adapters = [adapters]  # Only one adapter
+                
+            for adapter in adapters:
+                if not adapter: continue
+                speed_str = adapter.get("LinkSpeed", "")
+                name = adapter.get("Name", "Ethernet")
+                
+                # LinkSpeed format is typically "1 Gbps" or "100 Mbps"
+                match = re.search(r"(\d+(?:\.\d+)?)\s*(G|M|K)?bps", speed_str, re.IGNORECASE)
+                if match:
+                    val = float(match.group(1))
+                    unit = match.group(2)
+                    if unit and unit.upper() == "G":
+                        val *= 1000  # Convert Gbps to Mbps
+                    elif unit and unit.upper() == "K":
+                        val /= 1000  # Convert Kbps to Mbps
+                        
+                    if val > 0:
+                        return {
+                            "interface": name,
+                            "rx_mbps": val,
+                            "tx_mbps": val,
+                            "type": "ethernet"
+                        }
+        except Exception:
+            pass
+            
+        # Optional WMI fallback if powershell fails
+        wmic_out = run_cmd(["wmic", "nic", "where", "NetEnabled='true'", "get", "Name,Speed", "/format:csv"])
+        lines = [line.strip() for line in wmic_out.splitlines() if line.strip() and "Node" not in line]
+        for line in lines:
+            parts = line.split(",")
+            if len(parts) >= 3:
+                 speed_bps = float(parts[-1])
+                 name = parts[-2]
+                 speed_mbps = speed_bps / 1000000
+                 if speed_mbps > 0:
+                     return {
+                        "interface": name,
+                        "rx_mbps": speed_mbps,
+                        "tx_mbps": speed_mbps,
+                        "type": "ethernet"
+                     }
+    except Exception:
+        pass
 
-    rate = re.search(r"Bit Rate[:=]\s*([\d.]+)\s*Mb/s", iwc_out)
-    if not rate:
-        raise RuntimeError("Bitrate not available (not connected?)")
-
-    bitrate = float(rate.group(1))
-
-    return {
-        "interface": iface,
-        "rx_mbps": bitrate,
-        "tx_mbps": bitrate,
-    }
-
-
-def get_windows_wifi_speed():
-    """Get WiFi speed on Windows using netsh."""
-    output = run_cmd(["netsh", "wlan", "show", "interfaces"])
-
-    if "connected" not in output.lower():
-        raise RuntimeError("Wi-Fi not connected")
-
-    rx = re.search(r"Receive rate \(Mbps\)\s*:\s*(\d+)", output)
-    tx = re.search(r"Transmit rate \(Mbps\)\s*:\s*(\d+)", output)
-    iface = re.search(r"Interface name\s*:\s*(.+)", output)
-
-    if not rx or not tx:
-        raise RuntimeError("Failed to parse negotiated rates")
-
-    return {
-        "interface": iface.group(1).strip() if iface else "Wi-Fi",
-        "rx_mbps": float(rx.group(1)),
-        "tx_mbps": float(tx.group(1)),
-    }
+    raise RuntimeError("Failed to detect any network link speeds")
 
 
 def get_wifi_speed():
     """
-    Get negotiated WiFi speed in Mbps.
-    Returns None if WiFi speed cannot be determined.
+    Get negotiated network link speed in Mbps.
+    Returns None if speed cannot be determined.
+    Maintains function name `get_wifi_speed` for backward compatibility.
     """
     os_type = platform.system()
     
     try:
         if os_type == "Linux":
-            info = get_linux_wifi_speed()
+            info = get_linux_link_speed()
         elif os_type == "Windows":
-            info = get_windows_wifi_speed()
+            info = get_windows_link_speed()
         else:
             return None
         
         # Return the lower of rx/tx as conservative estimate
         return min(info["rx_mbps"], info["tx_mbps"])
     except Exception as e:
-        print(f"[wifi_speed] Could not detect WiFi speed: {e}")
+        print(f"[wifi_speed] Could not detect link speed: {e}")
         return None
 
 
-def calculate_optimal_chunk_size(speed_mbps: float = None) -> int:
+def calculate_optimal_chunk_size(speed_mbps: Optional[float] = None) -> int:
     """
     Calculate optimal chunk size for file transfers based on negotiated WiFi speed.
     
@@ -108,22 +207,27 @@ def calculate_optimal_chunk_size(speed_mbps: float = None) -> int:
         Chunk size in bytes.
     """
     if speed_mbps is None:
-        speed_mbps = get_wifi_speed()
+        val = get_wifi_speed()
+        if val is None:
+            return 64 * 1024
+        speed = float(val)
+    else:
+        speed = float(speed_mbps)
     
-    if speed_mbps is None or speed_mbps <= 0:
+    if speed <= 0.0:
         return 64 * 1024  # 64 KB fallback
     
-    if speed_mbps <= 50:
+    if speed <= 50.0:
         return 64 * 1024       # 64 KB  — slow link
-    elif speed_mbps <= 150:
+    elif speed <= 150.0:
         return 256 * 1024      # 256 KB — standard WiFi (802.11n)
-    elif speed_mbps <= 500:
+    elif speed <= 500.0:
         return 512 * 1024      # 512 KB — fast WiFi (802.11ac)
     else:
         return 1024 * 1024     # 1 MB   — very fast WiFi / Ethernet
 
 
-def estimate_transfer_time_seconds(file_size_bytes: int, speed_mbps: float = None) -> float:
+def estimate_transfer_time_seconds(file_size_bytes: int, speed_mbps: Optional[float] = None) -> float:
     """
     Estimate transfer time in seconds based on file size and WiFi speed.
     Uses 90% of negotiated speed as realistic estimate.
@@ -136,13 +240,18 @@ def estimate_transfer_time_seconds(file_size_bytes: int, speed_mbps: float = Non
         Estimated time in seconds, or 0 if cannot determine
     """
     if speed_mbps is None:
-        speed_mbps = get_wifi_speed()
+        val = get_wifi_speed()
+        if val is None:
+            return 0.0
+        speed = float(val)
+    else:
+        speed = float(speed_mbps)
     
-    if speed_mbps is None or speed_mbps <= 0:
-        return 0
-    
+    if speed <= 0.0:
+        return 0.0
+        
     # Use 90% of negotiated speed (10% reduction for overhead/real-world)
-    effective_speed_mbps = speed_mbps * 0.9
+    effective_speed_mbps = speed * 0.9
     
     # Convert Mbps to bytes per second: Mbps * 1_000_000 / 8
     bytes_per_second = effective_speed_mbps * 1_000_000 / 8
@@ -158,7 +267,7 @@ if __name__ == "__main__":
     
     speed = get_wifi_speed()
     if speed:
-        print(f"WiFi Speed: {speed} Mbps")
+        print(f"Network Speed: {speed} Mbps")
         print(f"Effective (90%): {float(speed) * 0.9:.1f} Mbps")
         
         chunk = calculate_optimal_chunk_size(float(speed))
@@ -169,5 +278,5 @@ if __name__ == "__main__":
         time_sec = estimate_transfer_time_seconds(gb_size, float(speed))
         print(f"Estimated 1GB transfer time: {time_sec:.1f} seconds ({time_sec/60:.1f} minutes)")
     else:
-        print("Could not detect WiFi speed", file=sys.stderr)
+        print("Could not detect network link speed", file=sys.stderr)
         sys.exit(1)
