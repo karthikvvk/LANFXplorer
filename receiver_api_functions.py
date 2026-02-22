@@ -327,4 +327,5 @@ async def start_receiver(
 async def stop_receiver(server) -> None:
     
     server.close()
-    await server.wait_closed()
+    if hasattr(server, 'wait_closed'):
+        await server.wait_closed()

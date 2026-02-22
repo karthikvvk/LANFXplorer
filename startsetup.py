@@ -64,7 +64,23 @@ def detect_interface():
             candidates.append(name)
 
         if not candidates:
-            raise RuntimeError("[-] No non-virtual, non-loopback interface with IPv4 address found")
+            # Phase 2: find interfaces that are UP or DOWN but have no IPv4 address yet
+            print("[!] No interface with IPv4 found — checking for available physical interfaces...")
+            link_out = subprocess.check_output(["ip", "-o", "link", "show"], text=True).strip()
+            for line in link_out.splitlines():
+                if "state UP" not in line and "state DOWN" not in line and "state UNKNOWN" not in line:
+                    continue
+                lm = re.match(r'^\d+:\s+([^:@\s]+)', line)
+                if not lm:
+                    continue
+                name = lm.group(1)
+                low = name.lower()
+                if low in ("lo",) or low.startswith(("veth", "docker", "br-", "cni0", "virbr", "vmnet")):
+                    continue
+                candidates.append(name)
+
+            if not candidates:
+                raise RuntimeError("[-] No non-virtual, non-loopback interface found (not even without IP)")
 
 
         prefs = ("eth", "enp", "ens", "en", "wlan", "wl")

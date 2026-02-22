@@ -11,3 +11,5 @@ pyOpenSSL
 service-identity
 bcrypt
 keyring
+SecretStorage
+keyrings.alt

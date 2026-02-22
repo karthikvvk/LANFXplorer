@@ -16,11 +16,41 @@ from typing import Optional
 _keyring = None
 
 def _get_keyring():
-    """Lazy load keyring module."""
+    """Lazy load keyring module with automatic backend selection for Linux.
+    
+    On Windows/macOS, keyring works out-of-the-box.
+    On Linux, keyring needs a D-Bus SecretService backend (GNOME Keyring, KWallet).
+    If none is available (headless/minimal distros), fall back to file-based storage.
+    """
     global _keyring
     if _keyring is None:
         try:
             import keyring
+            
+            # On Linux, verify the backend is actually usable
+            if platform.system().lower().startswith("linux"):
+                try:
+                    backend = keyring.get_keyring()
+                    backend_name = type(backend).__name__
+                    
+                    # Check if backend is a known non-functional placeholder
+                    if backend_name in ("Fail",) or "fail" in backend_name.lower():
+                        raise RuntimeError(f"Non-functional backend: {backend_name}")
+                    
+                    # Quick smoke test: try a harmless read to confirm the backend works
+                    keyring.get_password("LANFXplorer_probe", "_probe_")
+                    
+                except Exception:
+                    # D-Bus SecretService not available — use file-based fallback
+                    try:
+                        from keyrings.alt.file import PlaintextKeyring
+                        keyring.set_keyring(PlaintextKeyring())
+                        print("[config] Using file-based keyring backend (no D-Bus secret service found)")
+                    except ImportError:
+                        print("[config] Warning: No keyring backend available, install keyrings.alt")
+                        _keyring = False
+                        return None
+            
             _keyring = keyring
         except ImportError:
             _keyring = False  # Mark as unavailable

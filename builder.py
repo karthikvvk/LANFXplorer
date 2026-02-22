@@ -54,8 +54,10 @@ ITEMS = [
     "main.py",
     "wifi_speed.py",
     "path_security.py",
-    "app_config.py"
-    ""
+    "app_config.py",
+    "set_static_ip.py",
+    "reset_env.py",
+    "show_config.py",
 ]
 
 # Set Flutter bundle source and executable name based on OS

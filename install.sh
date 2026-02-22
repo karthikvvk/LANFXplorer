@@ -63,23 +63,23 @@ fi
 DEPS="wget make gcc g++ curl tar"
 
 install_deps() {
-  echo "[+] Installing build dependencies: $DEPS + dev libraries"
+  echo "[+] Installing build dependencies: $DEPS + dev libraries + keyring backend"
 
   if command -v apt-get >/dev/null 2>&1; then
     sudo apt-get update
-    sudo apt-get install -y $DEPS perl libffi-dev zlib1g-dev
+    sudo apt-get install -y $DEPS perl libffi-dev zlib1g-dev gnome-keyring libsecret-1-0 libsecret-1-dev
   elif command -v dnf >/dev/null 2>&1; then
-    sudo dnf install -y $DEPS perl libffi-devel zlib-devel
+    sudo dnf install -y $DEPS perl libffi-devel zlib-devel gnome-keyring libsecret libsecret-devel
   elif command -v yum >/dev/null 2>&1; then
-    sudo yum install -y $DEPS perl libffi-devel zlib-devel
+    sudo yum install -y $DEPS perl libffi-devel zlib-devel gnome-keyring libsecret libsecret-devel
   elif command -v xbps-install >/dev/null 2>&1; then
-    sudo xbps-install -Sy $DEPS perl libffi-devel zlib-devel
+    sudo xbps-install -Sy $DEPS perl libffi-devel zlib-devel gnome-keyring libsecret libsecret-devel
   elif command -v zypper >/dev/null 2>&1; then
-    sudo zypper install -y $DEPS perl libffi-devel zlib-devel
+    sudo zypper install -y $DEPS perl libffi-devel zlib-devel gnome-keyring libsecret-devel
   elif command -v pacman >/dev/null 2>&1; then
-    sudo pacman -Sy --noconfirm $DEPS perl libffi zlib
+    sudo pacman -Sy --noconfirm $DEPS perl libffi zlib gnome-keyring libsecret
   elif command -v apk >/dev/null 2>&1; then
-    sudo apk add $DEPS perl libffi-dev zlib-dev
+    sudo apk add $DEPS perl libffi-dev zlib-dev gnome-keyring libsecret-dev
   elif command -v snap >/dev/null 2>&1; then
     for pkg in $DEPS; do
       sudo snap install "$pkg" 2>/dev/null || echo "[!] snap: $pkg not available, skipping"
@@ -92,7 +92,7 @@ install_deps() {
     exit 1
   else
     echo "[!] No supported package manager found."
-    echo "    Please install these PACKAGES manually: $DEPS perl libffi-dev zlib1g-dev"
+    echo "    Please install these PACKAGES manually: $DEPS perl libffi-dev zlib1g-dev gnome-keyring libsecret"
     exit 1
   fi
 }
