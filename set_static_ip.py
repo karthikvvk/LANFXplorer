@@ -184,8 +184,17 @@ def assign_static_ip(interface_override=None):
     elif system_type.startswith("win"):
         _configure_windows(iface, free_ip)
 
-    # Step 4: persist to .env
+    # Step 4: clear stale CA keys so fresh CA discovery happens
+    #   Old ca_key.pem/ca_cert.pem are tied to the previous IP — keeping them
+    #   would make receive.py skip discovery and act as an orphan CA.
     pwd = config.pwd or os.getcwd()
+    for stale in ("ca_key.pem", "ca_cert.pem"):
+        p = os.path.join(pwd, stale)
+        if os.path.exists(p):
+            os.remove(p)
+            print(f"[static-ip] Removed stale {stale}")
+
+    # Step 5: persist to .env
     env_path = os.path.join(pwd, ".env")
     set_key(env_path, "HOST", free_ip)
     reload_config()

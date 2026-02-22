@@ -105,9 +105,11 @@ def scan_peers_udp(network=None):
     global gateway, cidr, file_path, host_ip, broadcast, system_name, interface, user, pwd, dest_host
     
     # Use centralized constants from AppConfig
-    DISCOVERY_PORT = AppConfig.PEER_DISCOVERY_PORT
-    PEER_DISCOVERY_MSG = AppConfig.PEER_DISCOVERY_MSG
-    PEER_RESPONSE_PREFIX = AppConfig.PEER_RESPONSE_PREFIX
+    config = AppConfig()
+    DISCOVERY_PORT = config.PEER_DISCOVERY_PORT
+    PEER_DISCOVERY_MSG = config.PEER_DISCOVERY_MSG
+    PEER_RESPONSE_PREFIX = config.PEER_RESPONSE_PREFIX
+    target_broadcast = config.broadcast or '<broadcast>'
     
     found = set()
     try:
@@ -116,16 +118,10 @@ def scan_peers_udp(network=None):
         sock.settimeout(2.0)
         
         try:
-            sock.sendto(PEER_DISCOVERY_MSG, ('<broadcast>', DISCOVERY_PORT))
+            sock.sendto(PEER_DISCOVERY_MSG, (target_broadcast, DISCOVERY_PORT))
         except Exception as e:
             pass
             
-        if broadcast:
-             try:
-                 sock.sendto(PEER_DISCOVERY_MSG, (broadcast, DISCOVERY_PORT))
-             except Exception:
-                 pass
-        
         start_time = time.time()
         while time.time() - start_time < 2.0:
             try:
@@ -140,6 +136,7 @@ def scan_peers_udp(network=None):
                 break
             except Exception:
                 pass
+
         sock.close()
     except Exception as e:
         print(f"[!] Peer UDP Scan failed: {e}", file=os.sys.stderr)

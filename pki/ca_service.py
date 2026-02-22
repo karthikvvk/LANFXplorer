@@ -46,9 +46,13 @@ class CADiscoveryProtocol(asyncio.DatagramProtocol):
         """Send WHO_IS_CA and reschedule until CA is found or transport closes."""
         if self.transport and not self.transport.is_closing():
             try:
-                self.transport.sendto(DISCOVERY_MSG, ('<broadcast>', DISCOVERY_PORT))
-                logger.debug("Sent WHO_IS_CA broadcast")
-            except Exception:
+                # Use specific subnet broadcast if available, otherwise fallback
+                config = AppConfig()
+                target_broadcast = config.broadcast or '<broadcast>'
+                self.transport.sendto(DISCOVERY_MSG, (target_broadcast, DISCOVERY_PORT))
+                logger.debug(f"Sent WHO_IS_CA broadcast to {target_broadcast}")
+            except Exception as e:
+                logger.debug(f"Broadcast failed: {e}")
                 pass
             # Reschedule every 1 second
             loop = asyncio.get_event_loop()

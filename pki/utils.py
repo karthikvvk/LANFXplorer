@@ -53,6 +53,7 @@ def verify_cert_validity(cert_pem: Union[str, bytes]) -> bool:
     :return: True if cert is valid (not expired), False otherwise
     """
     try:
+        from datetime import timedelta
         if isinstance(cert_pem, str):
             cert_pem = cert_pem.encode()
         cert = x509.load_pem_x509_certificate(cert_pem)
@@ -61,9 +62,12 @@ def verify_cert_validity(cert_pem: Union[str, bytes]) -> bool:
         nvb = cert.not_valid_before_utc if hasattr(cert, "not_valid_before_utc") else cert.not_valid_before.replace(tzinfo=timezone.utc)
         nva = cert.not_valid_after_utc if hasattr(cert, "not_valid_after_utc") else cert.not_valid_after.replace(tzinfo=timezone.utc)
         
-        is_valid = nvb <= now <= nva
+        # Add a 24-hour leeway for offline PCs with drifting clocks
+        leeway = timedelta(hours=24)
+        is_valid = (nvb - leeway) <= now <= (nva + leeway)
+        
         if not is_valid:
-            print(f"[pki] Cert validation failed: NOW={now} vs VALID={nvb} to {nva}")
+            print(f"[pki] Cert validation failed: NOW={now} vs VALID={nvb} to {nva} (with 24h leeway)")
         return is_valid
     except Exception as e:
         print(f"[pki] Cert validation error: {e}")
