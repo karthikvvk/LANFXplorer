@@ -176,7 +176,23 @@ def run_ui():
     # Check architecture compatibility (Flutter UI is x64 only)
     import struct
     if struct.calcsize("P") * 8 == 32:
-        print_status("info", "32-bit system detected — launching Tkinter UI")
+        print_status("info", "32-bit system detected — launching Python UI")
+
+        # Prefer PyInstaller-built executable (ships in release archive)
+        if platform.system().lower().startswith("win"):
+            pyinstaller_exe = APP_DIR / "python_ui" / "python_ui.exe"
+        else:
+            pyinstaller_exe = APP_DIR / "python_ui" / "python_ui"
+
+        if pyinstaller_exe.exists():
+            try:
+                return subprocess.Popen(
+                    [str(pyinstaller_exe)],
+                    cwd=str(APP_DIR))
+            except OSError as e:
+                print_status("warn", f"Cannot launch Python UI executable: {e}")
+
+        # Fallback: run from source (development mode)
         tkinter_script = APP_DIR / "32bitscreens" / "tkinter_app.py"
         if tkinter_script.exists():
             try:
@@ -188,7 +204,7 @@ def run_ui():
                 print_status("info", "Backend running headless. Access API at http://localhost:5000")
                 return None
         else:
-            print_status("warn", "Tkinter UI not found, running headless")
+            print_status("warn", "Python UI not found, running headless")
             print_status("info", "Backend running headless. Access API at http://localhost:5000")
             return None
 

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
 import os
+import sys
 import shutil
+import subprocess
 import tarfile
 import zipfile
 import platform
@@ -58,15 +60,83 @@ ITEMS = [
     "set_static_ip.py",
     "reset_env.py",
     "show_config.py",
+    "32bitscreens",
 ]
 
 # Set Flutter bundle source and executable name based on OS
 if SYSTEM.startswith("win"):
     FLUTTER_BUNDLE_SRC = "\\build\\windows\\runner\\Release"
     EXECUTABLE_NAME = "lanfxplorer.exe"
+    PYTHON_UI_EXE_NAME = "python_ui.exe"
 else:
     FLUTTER_BUNDLE_SRC = "/build/linux/x64/release/bundle"
     EXECUTABLE_NAME = "lanfxplorer"
+    PYTHON_UI_EXE_NAME = "python_ui"
+
+PYTHON_BUILD_DIR = os.path.join(ROOT, "python_build")
+
+
+def build_python_ui():
+    """
+    Use PyInstaller to compile the Tkinter-based Python UI
+    (32bitscreens/tkinter_app.py) into a standalone executable.
+    Build artifacts go into ./python_build (temporary).
+    Returns the path to the built executable, or None on failure.
+    """
+    entry_script = os.path.join(ROOT, "32bitscreens", "tkinter_app.py")
+    if not os.path.exists(entry_script):
+        print("[!] Python UI entry point not found, skipping PyInstaller build")
+        return None
+
+    dist_dir = os.path.join(PYTHON_BUILD_DIR, "dist")
+    work_dir = os.path.join(PYTHON_BUILD_DIR, "work")
+    spec_dir = PYTHON_BUILD_DIR
+
+    # Collect all .py modules from 32bitscreens as hidden imports
+    screens_dir = os.path.join(ROOT, "32bitscreens")
+    hidden_imports = []
+    for fname in os.listdir(screens_dir):
+        if fname.endswith(".py") and fname != "__init__.py" and fname != "tkinter_app.py":
+            mod_name = fname[:-3]  # strip .py
+            hidden_imports.extend(["--hidden-import", mod_name])
+
+    # Third-party packages used by 32bitscreens (e.g. api_client uses requests)
+    third_party_imports = [
+        "requests",
+        "urllib3",
+        "charset_normalizer",
+        "certifi",
+        "idna",
+    ]
+    for pkg in third_party_imports:
+        hidden_imports.extend(["--hidden-import", pkg])
+
+    cmd = [
+        sys.executable, "-m", "PyInstaller",
+        "--onefile",
+        "--name", "python_ui",
+        "--distpath", dist_dir,
+        "--workpath", work_dir,
+        "--specpath", spec_dir,
+        "--paths", screens_dir,
+        "--noconfirm",
+    ] + hidden_imports + [entry_script]
+
+    print(f"[*] Building Python UI with PyInstaller...")
+    print(f"    Command: {' '.join(cmd)}")
+
+    result = subprocess.run(cmd, cwd=ROOT)
+    if result.returncode != 0:
+        print("[!] PyInstaller build failed!")
+        return None
+
+    exe_path = os.path.join(dist_dir, PYTHON_UI_EXE_NAME)
+    if os.path.exists(exe_path):
+        print(f"[*] Python UI built successfully: {exe_path}")
+        return exe_path
+    else:
+        print(f"[!] Expected executable not found: {exe_path}")
+        return None
 
 
 # DISABLED: Log commenting functionality
@@ -196,7 +266,10 @@ def main():
             shutil.copy2(src, dst)
 
     # Copy flutter bundle - maintain full directory structure
-    bundle_dest = os.path.join(APPBUILD, "build", "linux", "x64", "release", "bundle")
+    if SYSTEM.startswith("win"):
+        bundle_dest = os.path.join(APPBUILD, "build", "windows", "runner", "Release")
+    else:
+        bundle_dest = os.path.join(APPBUILD, "build", "linux", "x64", "release", "bundle")
     shutil.copytree(
         ROOT + FLUTTER_BUNDLE_SRC,
         bundle_dest,
@@ -211,6 +284,21 @@ def main():
         print(f"[*] Copied {EXECUTABLE_NAME} to root directory for easy testing")
     else:
         print(f"[!] Warning: Executable not found at {executable_src}")
+
+    # --- Build and include Python UI (PyInstaller) ---
+    python_ui_exe = build_python_ui()
+    if python_ui_exe:
+        python_ui_dest = os.path.join(APPBUILD, "python_ui")
+        os.makedirs(python_ui_dest, exist_ok=True)
+        shutil.copy2(python_ui_exe, os.path.join(python_ui_dest, PYTHON_UI_EXE_NAME))
+        print(f"[*] Included Python UI executable in archive")
+    else:
+        print("[!] Warning: Python UI executable not included in archive")
+
+    # Cleanup temporary python_build directory
+    if os.path.exists(PYTHON_BUILD_DIR):
+        shutil.rmtree(PYTHON_BUILD_DIR)
+        print(f"[*] Cleaned up temporary python_build directory")
 
     # DISABLED: Comment out console.log and print statements
     # print("\n[*] Commenting out console.log and print statements...")
@@ -239,9 +327,9 @@ def main():
         print(f"[*] Created archive: {archive_name}")
 
     # Cleanup: Delete the temporary LANFXplorer directory used for building
-    if os.path.exists(APPBUILD):
-        shutil.rmtree(APPBUILD)
-        print(f"[*] Cleaned up temporary build directory: {APPBUILD}")
+    # if os.path.exists(APPBUILD):
+    #     shutil.rmtree(APPBUILD)
+    #     print(f"[*] Cleaned up temporary build directory: {APPBUILD}")
 
     # Output release instructions for the user
     print("\n" + "=" * 60)

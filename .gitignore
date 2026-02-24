@@ -4,7 +4,7 @@
 send_files/
 received_files/
 dump/
-*__pycache__/
+__pycache__/
 *.key
 .vscode/
 .agent/
@@ -66,3 +66,9 @@ app.*.map.json
 *.html
 Notes.md
 lanfxplorer
+python_build/
+python_ui/
+
+32bitscreens/__pycache__/
+32bitscreens/dist/
+32bitscreens/build/
