@@ -149,6 +149,16 @@ echo [+] Verifying cryptography package
 )
 
 REM ===============================
+REM Firewall rules
+REM ===============================
+echo [+] Configuring Windows Firewall rules for LANFXplorer...
+"%PY_DIR%\python.exe" "%APP_DIR%\firewall_manager.py" --install && (
+    echo [+] Firewall rules configured
+) || (
+    echo [WARNING] Firewall configuration failed. You may need to manually allow ports.
+)
+
+REM ===============================
 REM Desktop shortcut
 REM ===============================
 echo [+] Creating desktop shortcut

@@ -50,6 +50,18 @@ class AppConfig:
     HANDSHAKE_PORT = 4437     # Handshake Service (TCP)
     API_PORT = 5000           # API Bridge (Flask)
     
+    # ==================== PORT REGISTRY (for firewall management) ====================
+    # Each entry: (port, protocol, description, expose_to_network)
+    # expose_to_network=False means localhost-only (no firewall rule needed)
+    REQUIRED_PORTS = [
+        (4433, "udp", "QUIC File Transfer",  True),
+        (4434, "udp", "CA Discovery",        True),
+        (4435, "tcp", "CA Signing",          True),
+        (4436, "udp", "Peer Discovery",      True),
+        (4437, "tcp", "Handshake Service",   True),
+        (5000, "tcp", "Flask API (local)",   False),
+    ]
+    
     # ==================== PROTOCOL CONSTANTS ====================
     PEER_DISCOVERY_MSG = b"WHO_IS_PEER"
     PEER_RESPONSE_PREFIX = b"I_AM_PEER"

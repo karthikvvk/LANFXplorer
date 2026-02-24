@@ -231,6 +231,14 @@ def main():
     print_status("info", "Cleaning up existing services...")
     cleanup_existing_services()
     
+    # Probe firewall / port availability (non-privileged)
+    try:
+        from firewall_manager import probe_ports
+        print_status("info", "Probing port availability...")
+        probe_ports()
+    except Exception as e:
+        print_status("warn", f"Firewall probe skipped: {e}")
+    
     # Run setup - critical for environment configuration
     setup_result = run_script("startsetup.py", wait=True)
     if not setup_result:

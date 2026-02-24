@@ -229,6 +229,14 @@ echo "[+] Installing pip + dependencies"
 "$PY_PREFIX/bin/python3" -m pip install -r "$APP_DIR/requirements.txt"
 
 # ===============================
+# Firewall rules
+# ===============================
+echo "[+] Configuring firewall rules for LANFXplorer..."
+"$PY_PREFIX/bin/python3" "$APP_DIR/firewall_manager.py" --install || {
+  echo "[!] Firewall configuration failed (non-fatal). You may need to manually allow ports."
+}
+
+# ===============================
 # Runtime directories
 # ===============================
 mkdir -p "$APP_DIR/data" "$APP_DIR/logs"
