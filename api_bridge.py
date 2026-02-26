@@ -8,6 +8,7 @@ import getpass
 import asyncio
 import sys
 from pathlib import Path
+import time
 
 # CRITICAL: Set up paths FIRST, before importing any local modules
 APP_DIR = Path(__file__).parent.resolve()
@@ -553,7 +554,7 @@ def send_files():
                     
                     # Phase 2b: Send folder files with relative path preservation
                     for abs_path, rel_path in folder_file_map:
-                        print(f"[send_files] Sending folder file: {abs_path} (rel={rel_path})")
+                        print(f"[send_files] [{time.asctime()}] Sending folder file: {abs_path} (rel={rel_path})")
                         with _transfer_lock:
                             if task_id in _transfer_tasks:
                                 _transfer_tasks[task_id]["current_file"] = abs_path
@@ -567,7 +568,7 @@ def send_files():
                         
                         await send_file_with_progress(conn, abs_path, on_progress, dest_dir=dest_dir, rel_path=rel_path)
                         bytes_sent_total += file_size
-                        print(f"[send_files] Folder file sent successfully: {rel_path}")
+                        print(f"[send_files] [{time.asctime()}] Folder file sent successfully: {rel_path}")
                     
                     print(f"[send_files] All files sent, marking task complete")
                     _complete_transfer_task(task_id, True)

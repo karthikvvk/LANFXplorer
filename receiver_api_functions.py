@@ -6,6 +6,7 @@ import inspect
 import sys
 from typing import Awaitable, Callable, Optional
 from pathlib import Path
+import time
 
 # CRITICAL: Set up paths FIRST, before importing any local modules
 APP_DIR = Path(__file__).parent.resolve()
@@ -238,7 +239,7 @@ async def _handle_stream(
             await writer.drain()
             return
 
-        print(f"[receiver] Receiving file: {filename} ({filesize} bytes) -> {path}")
+        print(f"[receiver] [{time.asctime()}] Receiving file: {filename} ({filesize} bytes) -> {path}")
 
         parent_dir = os.path.dirname(path)
         if parent_dir:

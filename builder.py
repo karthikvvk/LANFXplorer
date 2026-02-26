@@ -61,6 +61,8 @@ ITEMS = [
     "reset_env.py",
     "show_config.py",
     "32bitscreens",
+    "firewall_manager.py",
+    
 ]
 
 # Set Flutter bundle source and executable name based on OS
@@ -327,9 +329,9 @@ def main():
         print(f"[*] Created archive: {archive_name}")
 
     # Cleanup: Delete the temporary LANFXplorer directory used for building
-    # if os.path.exists(APPBUILD):
-    #     shutil.rmtree(APPBUILD)
-    #     print(f"[*] Cleaned up temporary build directory: {APPBUILD}")
+    if os.path.exists(APPBUILD):
+        shutil.rmtree(APPBUILD)
+        print(f"[*] Cleaned up temporary build directory: {APPBUILD}")
 
     # Output release instructions for the user
     print("\n" + "=" * 60)

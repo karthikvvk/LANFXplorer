@@ -160,6 +160,57 @@ class DependencyChecker:
             return True
         print_status("fail", "pip not found")
         return False
+    @staticmethod
+    def check_iw() -> bool:
+        """Check if iw is installed (used for WiFi link speed detection)."""
+        success, stdout, _ = run_command(["iw", "--version"])
+        if success and stdout:
+            print_status("ok", f"iw detected: {stdout.strip().splitlines()[0]}")
+            return True
+        print_status("fail", "iw not found (needed for WiFi speed detection)")
+        return False
+
+    @staticmethod
+    def check_iwconfig() -> bool:
+        """Check if iwconfig is installed (wireless-tools, used for WiFi bit rate)."""
+        success, stdout, _ = run_command(["iwconfig", "--version"])
+        # iwconfig prints to stderr on --version, so just check it exists
+        if success or shutil.which("iwconfig"):
+            print_status("ok", "iwconfig (wireless-tools) detected")
+            return True
+        print_status("fail", "iwconfig not found (needed for WiFi speed detection)")
+        return False
+
+    @staticmethod
+    def install_wireless_tools_linux() -> bool:
+        """Install iw and wireless-tools on Linux."""
+        print_status("run", "Attempting to install iw and wireless-tools...")
+
+        pkg_managers = [
+            (["apt-get", "--version"], ["sudo", "apt-get", "install", "-y", "iw", "wireless-tools"]),
+            (["dnf", "--version"],     ["sudo", "dnf",     "install", "-y", "iw", "wireless-tools"]),
+            (["yum", "--version"],     ["sudo", "yum",     "install", "-y", "iw", "wireless-tools"]),
+            (["pacman", "--version"],  ["sudo", "pacman",  "-S", "--noconfirm", "iw", "wireless_tools"]),
+            (["zypper", "--version"],  ["sudo", "zypper",  "install", "-y", "iw", "wireless-tools"]),
+        ]
+
+        for check_cmd, install_cmd in pkg_managers:
+            success, _, _ = run_command(check_cmd)
+            if success:
+                success, _, stderr = run_command(install_cmd, timeout=300)
+                if success:
+                    print_status("ok", "iw and wireless-tools installed successfully")
+                    return True
+                else:
+                    print_status("fail", f"Failed to install wireless tools: {stderr}")
+                    return False
+
+        print_status("fail", "No supported package manager found")
+        return False
+
+
+
+
 
     @staticmethod
     def install_openssl_linux() -> bool:
@@ -237,12 +288,17 @@ class DependencyChecker:
     def check_all(self) -> dict:
         """Check all dependencies and return status."""
         print_header("Checking System Dependencies")
-        return {
-            "python": self.check_python(),
-            "pip": self.check_pip(),
-            "openssl": self.check_openssl(),
-            "flutter": self.check_flutter(),
+        results = {
+            "python":   self.check_python(),
+            "pip":      self.check_pip(),
+            "openssl":  self.check_openssl(),
+            "flutter":  self.check_flutter(),
         }
+        # Wireless tools are Linux-only
+        if SYSTEM.startswith("linux"):
+            results["iw"]       = self.check_iw()
+            results["iwconfig"] = self.check_iwconfig()
+        return results
 
 
 # =============================================================================
@@ -883,13 +939,20 @@ class Installer:
     def check_dependencies(self) -> bool:
         """Check all dependencies."""
         results = self.dep_checker.check_all()
-        
+
         # OpenSSL is critical
         if not results["openssl"]:
             print_status("info", "Attempting to install OpenSSL...")
             if not self.dep_checker.install_openssl():
                 print_status("warn", "OpenSSL installation failed. Please install manually.")
-        
+
+        # iw / wireless-tools (Linux only, non-critical but needed for WiFi speed)
+        if SYSTEM.startswith("linux"):
+            if not results.get("iw") or not results.get("iwconfig"):
+                print_status("info", "Attempting to install iw and wireless-tools...")
+                if not self.dep_checker.install_wireless_tools_linux():
+                    print_status("warn", "Wireless tools installation failed. WiFi speed detection may not work.")
+
         return results["python"] and results["pip"]
 
     def configure_firewall(self) -> bool:

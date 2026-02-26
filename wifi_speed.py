@@ -24,14 +24,14 @@ def run_cmd(cmd):
     except FileNotFoundError:
         raise RuntimeError(f"Command not found: {cmd[0]}")
 
-
 def get_linux_link_speed():
-    """Get link speed on Linux (tries WiFi first, then Ethernet)."""
+    """Get link speed on Linux (tries WiFi first via iwconfig, then iw dev, then Ethernet)."""
+
     # Try WiFi first using iwconfig
     try:
         ip_out = run_cmd(["ip", "link", "show"])
-        match = re.search(r"\d+:\s+(wlan\d+|wlp\w+):", ip_out)
-        
+        match = re.search(r"\d+:\s+(wlan\d+|wlp\w+|wl\w+):", ip_out)
+
         if match:
             iface = match.group(1)
             iwc_out = run_cmd(["iwconfig", iface])
@@ -46,35 +46,55 @@ def get_linux_link_speed():
                 }
     except Exception:
         pass
-        
-    # Fallback: Try Ethernet by looking at active interfaces in /sys/class/net
+
+    # Second attempt: use `iw dev <iface> link`
+    try:
+        ip_out = run_cmd(["ip", "link", "show"])
+        match = re.search(r"\d+:\s+(wlan\d+|wlp\w+|wl\w+):", ip_out)
+
+        if match:
+            iface = match.group(1)
+            iw_out = run_cmd(["iw", "dev", iface, "link"])
+
+            # Typical line: "tx bitrate: 72.2 MBit/s"
+            rate = re.search(r"tx bitrate:\s*([\d.]+)\s*MBit/s", iw_out)
+            if rate:
+                bitrate = float(rate.group(1))
+                return {
+                    "interface": iface,
+                    "rx_mbps": bitrate,
+                    "tx_mbps": bitrate,
+                    "type": "wifi"
+                }
+    except Exception:
+        pass
+
+    # Fallback: Ethernet via /sys/class/net
     try:
         import glob
         import os
+
         for sys_path in glob.glob("/sys/class/net/*"):
             iface = os.path.basename(sys_path)
-            # Skip loopback and wlan (already tried)
+
             if iface == "lo" or iface.startswith(("wlan", "wlp", "wl")):
                 continue
-                
-            # Check if link is up
+
             operstate_path = os.path.join(sys_path, "operstate")
             if not os.path.exists(operstate_path):
                 continue
-                
+
             with open(operstate_path, "r") as f:
                 state = f.read().strip()
-                
-            if state != "up" and state != "unknown": 
-                continue # 'unknown' can sometimes mean up for simple virtual eth
-                
-            # Try to read speed
+
+            if state != "up" and state != "unknown":
+                continue
+
             speed_path = os.path.join(sys_path, "speed")
             if os.path.exists(speed_path):
                 try:
                     with open(speed_path, "r") as f:
                         speed_str = f.read().strip()
-                        # Some drivers report -1 if speed is unknown
                         if speed_str and int(speed_str) > 0:
                             bitrate = float(speed_str)
                             return {
@@ -87,9 +107,8 @@ def get_linux_link_speed():
                     continue
     except Exception:
         pass
-        
-    raise RuntimeError("No active network connection with detectable speed found")
 
+    raise RuntimeError("No active network connection with detectable speed found")
 
 def get_windows_link_speed():
     """Get link speed on Windows (tries WiFi first, then Ethernet)."""

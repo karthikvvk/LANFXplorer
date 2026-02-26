@@ -25,7 +25,7 @@ from config_manager import get_password
 
 def on_file_received(filepath: str, filesize: int) -> None:
     """Callback when a file is successfully received."""
-    print(f"[receiver] Received file: {filepath} ({filesize} bytes)")
+    print(f"[receiver] [{time.asctime()}] Received file: {filepath} ({filesize} bytes)")
 
 
 async def main() -> None:
