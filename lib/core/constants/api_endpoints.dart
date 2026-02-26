@@ -13,4 +13,5 @@ class ApiEndpoints {
   static const String createFolder = '/create_folder';
   static const String deleteItem = '/delete_item';
   static const String checkPassword = '/check_password';
+  static const String fixFirewall = '/fix_firewall';
 }

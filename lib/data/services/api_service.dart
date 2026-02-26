@@ -370,6 +370,24 @@ class ApiService {
     }
   }
 
+  /// Trigger privileged firewall rule installation.
+  /// Returns a map with {success, output, error}.
+  Future<Map<String, dynamic>> fixFirewall() async {
+    try {
+      AppLogger.info('Requesting firewall fix...');
+      final response = await _client.post(
+        Uri.parse('${ApiEndpoints.baseUrl}${ApiEndpoints.fixFirewall}'),
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 45));
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return data;
+    } catch (e, stack) {
+      AppLogger.error('Fix firewall error', error: e, stackTrace: stack);
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
   void dispose() {
     _client.close();
   }

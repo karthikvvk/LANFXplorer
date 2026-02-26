@@ -12,6 +12,7 @@ import os
 import math
 
 from themes import c, set_theme, is_dark, DARK, LIGHT
+from landing_page import TroubleshootOverlay
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -60,7 +61,8 @@ def _fmt_size(size):
 class AppHeader(tk.Frame):
     """Top bar with logo, connection info, and action buttons."""
     def __init__(self, master, machine=None, on_send=None, on_fetch=None,
-                 on_home=None, on_signout=None, on_theme=None, **kw):
+                 on_home=None, on_signout=None, on_theme=None,
+                 on_troubleshoot=None, **kw):
         super().__init__(master, bg=c("header"), height=56, **kw)
         self.pack_propagate(False)
         self._machine   = machine or {}
@@ -69,6 +71,7 @@ class AppHeader(tk.Frame):
         self._on_home   = on_home
         self._on_signout= on_signout
         self._on_theme  = on_theme
+        self._on_troubleshoot = on_troubleshoot
         self._build()
 
     def _build(self):
@@ -121,6 +124,16 @@ class AppHeader(tk.Frame):
             cursor="hand2",
             command=self._on_theme)
         self._theme_btn.pack(side="right", padx=2)
+
+        # Troubleshoot
+        self._troubleshoot_btn = tk.Button(
+            right, text="🔧", font=("Segoe UI", 14),
+            bg=c("header"), fg=c("btn_fg"),
+            activebackground=c("header"),
+            relief="flat", bd=0, padx=4, pady=2,
+            cursor="hand2",
+            command=self._on_troubleshoot)
+        self._troubleshoot_btn.pack(side="right", padx=2)
 
         # Home
         self._home_btn = tk.Button(
@@ -598,6 +611,7 @@ class ExplorerPage(tk.Frame):
             on_home=self._go_home,
             on_signout=self._do_signout,
             on_theme=self._toggle_theme,
+            on_troubleshoot=self._show_troubleshoot,
         )
         self._header.pack(fill="x")
 
@@ -728,6 +742,9 @@ class ExplorerPage(tk.Frame):
     def _toggle_theme(self):
         if self._nav:
             self._nav.toggle_theme()
+
+    def _show_troubleshoot(self):
+        TroubleshootOverlay(self)
 
     def refresh_theme(self):
         self.config(bg=c("bg"))

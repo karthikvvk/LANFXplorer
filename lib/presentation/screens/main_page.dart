@@ -5,6 +5,7 @@ import 'package:lanfxplorer/presentation/components/drag_drop_zone.dart';
 import 'package:lanfxplorer/presentation/components/file_item_card.dart';
 import 'package:lanfxplorer/presentation/components/theme_toggle_button.dart';
 import 'package:lanfxplorer/presentation/components/transfer_status_widget.dart';
+import 'package:lanfxplorer/presentation/dialogs/troubleshoot_dialog.dart';
 import 'package:lanfxplorer/presentation/providers/env_provider.dart';
 import 'package:lanfxplorer/presentation/providers/file_system_provider.dart';
 import 'package:lanfxplorer/presentation/providers/session_provider.dart';
@@ -185,6 +186,15 @@ class _MainPageState extends State<MainPage> {
     );
   }
 
+  void _showTroubleshoot() {
+    showDialog(
+      context: context,
+      builder: (context) => TroubleshootDialog(
+        apiService: context.read<ApiService>(),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -250,6 +260,12 @@ class _MainPageState extends State<MainPage> {
                   icon: Icons.history,
                   label: 'History',
                   onPressed: _showTransferHistory,
+                ),
+                const SizedBox(width: AppSpacing.xs),
+                _ToolbarButton(
+                  icon: Icons.build,
+                  label: 'Troubleshoot',
+                  onPressed: _showTroubleshoot,
                 ),
                 const SizedBox(width: AppSpacing.xs),
                 _ToolbarButton(

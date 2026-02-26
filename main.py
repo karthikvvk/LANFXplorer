@@ -231,13 +231,75 @@ def main():
     print_status("info", "Cleaning up existing services...")
     cleanup_existing_services()
     
-    # Probe firewall / port availability (non-privileged)
+    # Quick connectivity check (ping gateway – 5 s timeout)
     try:
-        from firewall_manager import probe_ports
-        print_status("info", "Probing port availability...")
-        probe_ports()
+        import socket, struct as _st
+        _bits = _st.calcsize("P") * 8
+
+        def _quick_ping() -> bool:
+            """Try to reach the default gateway via ICMP ping (5 s)."""
+            gw = None
+            try:
+                # Detect gateway from /proc on Linux
+                with open("/proc/net/route") as f:
+                    for line in f:
+                        parts = line.strip().split()
+                        if len(parts) >= 3 and parts[1] != "00000000":
+                            continue
+                        if parts[1] == "00000000" and parts[0] != "lo":
+                            gw_hex = parts[2]
+                            gw = socket.inet_ntoa(bytes.fromhex(gw_hex)[::-1] if sys.byteorder == "little"
+                                                  else bytes.fromhex(gw_hex))
+                            break
+            except Exception:
+                pass
+
+            if not gw:
+                # Fallback: try pinging localhost (services should be reachable)
+                gw = "127.0.0.1"
+
+            try:
+                r = subprocess.run(
+                    ["ping", "-c", "1", "-W", "5", gw],
+                    capture_output=True, timeout=6)
+                return r.returncode == 0
+            except Exception:
+                return False
+
+        if not _quick_ping():
+            print_status("warn", "Network ping failed – firewall may be blocking traffic")
+            # Show a GUI popup if possible (Tk is always available for 32-bit)
+            try:
+                import tkinter as _tk
+                from tkinter import messagebox as _mb
+                _root = _tk.Tk()
+                _root.withdraw()
+                ans = _mb.askyesno(
+                    "Firewall Required",
+                    "Network ping failed. The firewall may be blocking "
+                    "LANFXplorer.\n\n"
+                    "Would you like to fix the firewall rules now?\n"
+                    "(Requires administrator / sudo privileges)")
+                _root.destroy()
+                if ans:
+                    import shutil
+                    fw_script = str(APP_DIR / "firewall_manager.py")
+                    if shutil.which("pkexec"):
+                        cmd = ["pkexec", sys.executable, fw_script, "--install"]
+                    else:
+                        cmd = ["sudo", sys.executable, fw_script, "--install"]
+                    print_status("run", f"Running: {' '.join(cmd)}")
+                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                    if res.returncode == 0:
+                        print_status("ok", "Firewall rules applied")
+                    else:
+                        print_status("fail", f"Firewall fix failed: {(res.stdout or '') + (res.stderr or '')}")
+            except Exception as gui_err:
+                print_status("warn", f"Could not show firewall popup: {gui_err}")
+        else:
+            print_status("ok", "Network connectivity OK")
     except Exception as e:
-        print_status("warn", f"Firewall probe skipped: {e}")
+        print_status("warn", f"Connectivity check skipped: {e}")
     
     # Run setup - critical for environment configuration
     setup_result = run_script("startsetup.py", wait=True)

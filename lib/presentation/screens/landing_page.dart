@@ -2,6 +2,7 @@ import 'package:lanfxplorer/data/models/machine.dart';
 import 'package:lanfxplorer/presentation/components/machine_card.dart';
 import 'package:lanfxplorer/presentation/components/theme_toggle_button.dart';
 import 'package:lanfxplorer/presentation/dialogs/connection_dialog.dart';
+import 'package:lanfxplorer/presentation/dialogs/troubleshoot_dialog.dart';
 import 'package:lanfxplorer/presentation/providers/env_provider.dart';
 import 'package:lanfxplorer/presentation/providers/network_provider.dart';
 import 'package:lanfxplorer/presentation/providers/session_provider.dart';
@@ -95,6 +96,15 @@ class _LandingPageState extends State<LandingPage> {
     }
   }
 
+  void _showTroubleshoot() {
+    showDialog(
+      context: context,
+      builder: (context) => TroubleshootDialog(
+        apiService: context.read<NetworkProvider>().apiService,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -142,6 +152,12 @@ class _LandingPageState extends State<LandingPage> {
                       ),
                     ],
                   ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.build),
+                  onPressed: _showTroubleshoot,
+                  tooltip: 'Troubleshoot',
+                  color: colorScheme.tertiary,
                 ),
                 IconButton(
                   icon: const Icon(Icons.refresh),

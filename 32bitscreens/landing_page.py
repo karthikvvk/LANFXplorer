@@ -8,15 +8,17 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import math
 import os
+import sys
+import subprocess
 import threading
 
 from themes import c, set_theme, is_dark, DARK, LIGHT
 
-
-# ── .env loader (lightweight) ────────────────────────────────────────────────
+_SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+# ── .env loader (lightweight) ────────────────────────────────────────────────
 def _load_env():
     """Read .env from project root into a dict."""
     env = {}
@@ -501,6 +503,10 @@ class LandingHeader(tk.Frame):
                                           fg=c("error"), tooltip="Sign Out")
         self._logout_btn.pack(side="right", padx=2)
 
+        self._troubleshoot_btn = self._icon_btn(right, "🔧", self._troubleshoot,
+                                                tooltip="Troubleshoot")
+        self._troubleshoot_btn.pack(side="right", padx=2)
+
         self._refresh_btn = self._icon_btn(right, "⟳", self._refresh,
                                            tooltip="Scan Network")
         self._refresh_btn.pack(side="right", padx=2)
@@ -555,6 +561,9 @@ class LandingHeader(tk.Frame):
 
     def _logout(self):
         self._app.confirm_logout()
+
+    def _troubleshoot(self):
+        self._app.show_troubleshoot()
 
     def _refresh(self):
         self._app.start_scan()
@@ -810,6 +819,185 @@ class ConnectionDialog(tk.Toplevel):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Troubleshoot Overlay
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TroubleshootOverlay(tk.Toplevel):
+    """Modal dialog with troubleshooting steps and a FIX Firewall button."""
+    W, H = 520, 560
+
+    STEPS = [
+        ("1", "🗑  Clear Cache",
+         "Close the app completely, delete any cached data\n"
+         "(browser cache, app data), and relaunch."),
+        ("2", "📡  Check Network Connection",
+         "Verify your Wi-Fi or Ethernet cable is connected\n"
+         "and active. Try pinging your gateway."),
+        ("3", "🌐  Verify Correct Network",
+         "Ensure both devices are on the same LAN / subnet.\n"
+         "Wrong network can cause CA certificate mismatches."),
+        ("4", "🔑  Check Certificates & Keys",
+         "Confirm the certs/ directory exists and contains\n"
+         "valid CA cert, client cert, and key files."),
+        ("5", "🛡  Fix Firewall Rules (requires sudo)",
+         "Your system firewall may be blocking required ports.\n"
+         "Click the button below to add allow-rules."),
+    ]
+
+    def __init__(self, master, **kw):
+        super().__init__(master, **kw)
+        self.title("Troubleshoot")
+        self.configure(bg=c("card_bg"))
+        self.resizable(False, False)
+        self.transient(master.winfo_toplevel())
+        self._build()
+        self._center()
+        self.after(50, self._safe_grab)
+
+    def _build(self):
+        BG = c("card_bg")
+        HDR = c("panel_top")
+
+        # ── Title bar ──
+        title_bar = tk.Frame(self, bg=HDR, height=52)
+        title_bar.pack(fill="x")
+        title_bar.pack_propagate(False)
+
+        tk.Label(title_bar, text="🔧", font=("Segoe UI", 16),
+                 bg=HDR, fg=c("accent")).pack(side="left", padx=(18, 6), pady=12)
+        tk.Label(title_bar, text="Troubleshoot",
+                 font=("Segoe UI", 12, "bold"),
+                 bg=HDR, fg=c("text")).pack(side="left", padx=4)
+
+        close_btn = tk.Button(title_bar, text="✕",
+                              font=("Segoe UI", 11),
+                              bg=HDR, fg=c("subtext"),
+                              activebackground=c("error"),
+                              activeforeground="#ffffff",
+                              relief="flat", bd=0,
+                              padx=10, pady=8,
+                              cursor="hand2",
+                              command=self.destroy)
+        close_btn.pack(side="right")
+
+        # ── Intro text ──
+        tk.Label(self,
+                 text="If the app isn't connecting, try these steps:",
+                 font=("Segoe UI", 9),
+                 bg=BG, fg=c("subtext"),
+                 anchor="w").pack(fill="x", padx=20, pady=(14, 8))
+
+        # ── Steps ──
+        for num, title, desc in self.STEPS:
+            step_frame = tk.Frame(self, bg=BG)
+            step_frame.pack(fill="x", padx=20, pady=4)
+
+            # Number badge
+            badge = tk.Label(step_frame, text=num,
+                             font=("Segoe UI", 9, "bold"),
+                             bg=c("accent"), fg="#ffffff",
+                             width=2, height=1)
+            badge.pack(side="left", padx=(0, 8), anchor="n")
+
+            info = tk.Frame(step_frame, bg=BG)
+            info.pack(side="left", fill="x", expand=True)
+
+            tk.Label(info, text=title,
+                     font=("Segoe UI", 9, "bold"),
+                     bg=BG, fg=c("text"),
+                     anchor="w").pack(fill="x")
+            tk.Label(info, text=desc,
+                     font=("Segoe UI", 8),
+                     bg=BG, fg=c("subtext"),
+                     anchor="w", justify="left").pack(fill="x")
+
+        # ── Result area ──
+        self._result_frame = tk.Frame(self, bg=BG)
+        self._result_frame.pack(fill="x", padx=20, pady=(8, 0))
+        self._result_lbl = tk.Label(self._result_frame, text="",
+                                    font=("Segoe UI", 9),
+                                    bg=BG, fg=c("subtext"),
+                                    wraplength=460, justify="left")
+        self._result_lbl.pack(fill="x")
+
+        # ── Footer ──
+        footer = tk.Frame(self, bg=BG)
+        footer.pack(fill="x", padx=20, pady=(12, 20))
+
+        tk.Label(footer, text="Step 5 requires sudo privileges",
+                 font=("Segoe UI", 8),
+                 bg=BG, fg=c("subtext")).pack(side="left")
+
+        self._fix_btn = tk.Button(
+            footer, text="🛠  FIX Firewall",
+            font=("Segoe UI", 10, "bold"),
+            bg=c("accent"), fg="#ffffff",
+            activebackground="#2255bb",
+            activeforeground="#ffffff",
+            relief="flat", bd=0,
+            padx=16, pady=6,
+            cursor="hand2",
+            command=self._fix_firewall)
+        self._fix_btn.pack(side="right")
+
+    def _fix_firewall(self):
+        self._fix_btn.config(state="disabled", text="Fixing…")
+        self._result_lbl.config(text="", fg=c("subtext"))
+
+        def _bg():
+            try:
+                import shutil
+                fw_script = os.path.join(_PROJECT_ROOT, "firewall_manager.py")
+                python = sys.executable or "python3"
+
+                if os.name == "nt":
+                    cmd = [python, fw_script, "--install"]
+                elif shutil.which("pkexec"):
+                    cmd = ["pkexec", python, fw_script, "--install"]
+                else:
+                    cmd = ["sudo", python, fw_script, "--install"]
+
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=30)
+                output = (result.stdout or "") + (result.stderr or "")
+                success = result.returncode == 0
+                self.after(0, lambda: self._on_fix_done(success, output.strip()))
+            except subprocess.TimeoutExpired:
+                self.after(0, lambda: self._on_fix_done(
+                    False, "Timed out. Run manually: sudo python3 firewall_manager.py --install"))
+            except Exception as e:
+                self.after(0, lambda: self._on_fix_done(False, str(e)))
+
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def _on_fix_done(self, success, message):
+        self._fix_btn.config(state="normal", text="🛠  FIX Firewall")
+        if success:
+            self._result_lbl.config(
+                text=f"✓ {message or 'Firewall rules applied.'}",
+                fg=c("online"))
+        else:
+            self._result_lbl.config(
+                text=f"✗ {message or 'Failed.'}",
+                fg=c("error"))
+
+    def _safe_grab(self):
+        try:
+            self.grab_set()
+        except tk.TclError:
+            pass
+
+    def _center(self):
+        self.update_idletasks()
+        root = self.master
+        while root.master:
+            root = root.master
+        rx = root.winfo_rootx() + root.winfo_width()  // 2 - self.W // 2
+        ry = root.winfo_rooty() + root.winfo_height() // 2 - self.H // 2
+        self.geometry(f"{self.W}x{self.H}+{rx}+{ry}")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Landing Page
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -946,6 +1134,9 @@ class LandingPage(tk.Frame):
         win.after(1600, win.destroy)
 
     # ── App-level callbacks for header buttons ──
+    def show_troubleshoot(self):
+        TroubleshootOverlay(self)
+
     def toggle_theme(self):
         if self._nav:
             self._nav.toggle_theme()

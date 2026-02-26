@@ -12,6 +12,7 @@ import threading
 import sys
 
 from themes import c, set_theme, is_dark, DARK, LIGHT
+from landing_page import TroubleshootOverlay
 
 # ── Fallback for running standalone (uses project root for .env) ──────────
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -393,6 +394,22 @@ class LoginPage(tk.Frame):
                                     highlightthickness=1, width=38)
         self._reset_btn.pack(fill="x")
 
+        tk.Frame(col, bg=c("bg"), height=8).pack()
+
+        # ── Troubleshoot Connection ──
+        self._troubleshoot_btn = tk.Button(col,
+                                    text="\ud83d\udd27  Troubleshoot Connection",
+                                    command=self._show_troubleshoot,
+                                    font=("Segoe UI", 10),
+                                    bg=c("bg"), fg=c("accent"),
+                                    activebackground=c("field_bg"),
+                                    activeforeground=c("accent"),
+                                    relief="flat", bd=0,
+                                    pady=12, cursor="hand2",
+                                    highlightbackground=c("accent"),
+                                    highlightthickness=1, width=38)
+        self._troubleshoot_btn.pack(fill="x")
+
         tk.Frame(col, bg=c("bg"), height=40).pack()
 
         self.after(50, self._reflow)
@@ -558,10 +575,13 @@ class LoginPage(tk.Frame):
     def _on_reset_done(self, ok):
         self._set_loading(False)
         if ok:
-            self._toast("Environment reset. Restarting…")
+            self._toast("Environment reset. Restarting\u2026")
             self.after(800, lambda: sys.exit(0))
         else:
             self._err_banner.show("Reset failed. Please try again.")
+
+    def _show_troubleshoot(self):
+        TroubleshootOverlay(self)
 
     def _set_loading(self, loading):
         self._is_loading = loading

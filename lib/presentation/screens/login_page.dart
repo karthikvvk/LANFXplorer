@@ -2,6 +2,7 @@ import 'package:lanfxplorer/presentation/providers/env_provider.dart';
 import 'package:lanfxplorer/data/services/api_service.dart';
 import 'package:lanfxplorer/theme.dart';
 import 'package:lanfxplorer/core/constants/path_security.dart';
+import 'package:lanfxplorer/presentation/dialogs/troubleshoot_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
@@ -254,6 +255,15 @@ class _LoginPageState extends State<LoginPage> {
         setState(() => _isResetting = false);
       }
     }
+  }
+
+  void _showTroubleshoot() {
+    showDialog(
+      context: context,
+      builder: (context) => TroubleshootDialog(
+        apiService: ApiService(),
+      ),
+    );
   }
 
   @override
@@ -577,6 +587,28 @@ class _LoginPageState extends State<LoginPage> {
                   )
                       .animate()
                       .fadeIn(duration: 400.ms, delay: 1000.ms)
+                      .slideY(begin: 0.2, end: 0),
+
+                  const SizedBox(height: AppSpacing.sm),
+
+                  // Troubleshoot button
+                  OutlinedButton.icon(
+                    onPressed: _isLoading ? null : _showTroubleshoot,
+                    icon: const Icon(Icons.build, size: 18),
+                    label: const Text('Troubleshoot Connection'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      foregroundColor: colorScheme.tertiary,
+                      side: BorderSide(
+                          color: colorScheme.tertiary.withOpacity(0.5),
+                          width: 1),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppRadius.md),
+                      ),
+                    ),
+                  )
+                      .animate()
+                      .fadeIn(duration: 400.ms, delay: 1100.ms)
                       .slideY(begin: 0.2, end: 0),
                 ],
               ),

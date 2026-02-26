@@ -9,6 +9,7 @@ import asyncio
 import sys
 from pathlib import Path
 import time
+import subprocess
 
 # CRITICAL: Set up paths FIRST, before importing any local modules
 APP_DIR = Path(__file__).parent.resolve()
@@ -1029,6 +1030,65 @@ def reset_environment_endpoint():
     except Exception as e:
         print(f"[!] Reset error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/fix_firewall', methods=['POST'])
+def fix_firewall():
+    """Run firewall_manager.py --install with elevated privileges."""
+    try:
+        import shutil
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+        fw_script = os.path.join(app_dir, "firewall_manager.py")
+
+        if not os.path.isfile(fw_script):
+            return jsonify({
+                "success": False,
+                "error": "firewall_manager.py not found"
+            }), 500
+
+        system = platform.system().lower()
+
+        if system == "windows":
+            # On Windows, use runas for elevation (non-interactive)
+            cmd = [sys.executable, fw_script, "--install"]
+        else:
+            # On Linux/macOS, use pkexec (polkit) for GUI privilege prompt
+            # Falls back to sudo if pkexec is not available
+            if shutil.which("pkexec"):
+                cmd = ["pkexec", sys.executable, fw_script, "--install"]
+            else:
+                cmd = ["sudo", sys.executable, fw_script, "--install"]
+
+        print(f"[fix_firewall] Running: {' '.join(cmd)}")
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        output = (result.stdout or "") + (result.stderr or "")
+        success = result.returncode == 0
+
+        print(f"[fix_firewall] Exit code: {result.returncode}")
+        if output.strip():
+            print(f"[fix_firewall] Output: {output.strip()[:500]}")
+
+        return jsonify({
+            "success": success,
+            "output": output.strip(),
+            "returncode": result.returncode,
+        }), 200
+
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            "success": False,
+            "error": "Firewall fix timed out (30s). You may need to run manually: sudo python3 firewall_manager.py --install"
+        }), 504
+    except Exception as e:
+        print(f"[!] fix_firewall error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 if __name__ == "__main__":
