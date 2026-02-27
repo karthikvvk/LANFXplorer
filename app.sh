@@ -3,7 +3,7 @@ set -e
 
 # =================================================
 # LANFXplorer — Unified Application Launcher
-# Supports 64-bit (with UI) & 32-bit (headless)
+# 64-bit: Flutter UI  |  32-bit: Python UI → headless
 # =================================================
 
 # -------------------------------------------------
@@ -86,8 +86,8 @@ HOST_ARCH="$(uname -m)"
 ARCH_BITS=64
 if [ "$HOST_ARCH" = "i686" ] || [ "$HOST_ARCH" = "i386" ]; then
   ARCH_BITS=32
-  # 32-bit: force headless (Flutter UI is x64 only)
-  FORCE_HEADLESS=1
+  # 32-bit: Flutter UI won't work (x64 only) but main.py will
+  # try Python UI (tkinter) first, then fall back to headless CLI
   # Point Rust to our custom OpenSSL (for pip rebuilds)
   export OPENSSL_DIR="$OPENSSL_PREFIX"
   export OPENSSL_LIB_DIR="$OPENSSL_LIB"

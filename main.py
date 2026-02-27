@@ -6,7 +6,7 @@ Orchestrates the complete application startup in order:
 1. startsetup.py - PKI and environment setup
 2. receive.py - QUIC receiver (background)
 3. api_bridge.py - Flask API (background)
-4. lanfxplorer.AppImage / lanfxplorer.exe - UI
+4. UI launch: Flutter (64-bit) → Python UI (32-bit) → headless CLI (fallback)
 """
 import os
 import sys
@@ -154,12 +154,57 @@ def run_script(script_name: str, wait: bool = True):
 
 
 def run_ui():
-    # Headless mode (set by app_32bit.sh / app_32bit.bat)
+    """Try to launch a UI in order: Flutter (64-bit) → Python UI (32-bit) → headless."""
+
+    # Explicit headless mode (set by --headless flag or app_32bit.sh/bat)
     if os.environ.get("LANFXPLORER_HEADLESS"):
         print_status("info", "Headless mode — UI skipped")
         print_status("info", "Backend running. Access API at http://localhost:5000")
         return None
 
+    import struct
+    is_32bit = struct.calcsize("P") * 8 == 32
+
+    # ── 32-bit systems: try Python UI first, then fall back to headless CLI ──
+    if is_32bit:
+        print_status("info", "32-bit system detected — Flutter UI not available")
+        print_status("info", "Trying Python UI...")
+
+        # Try 1: PyInstaller-built executable (ships in release archive)
+        if platform.system().lower().startswith("win"):
+            pyinstaller_exe = APP_DIR / "python_ui" / "python_ui.exe"
+        else:
+            pyinstaller_exe = APP_DIR / "python_ui" / "python_ui"
+
+        if pyinstaller_exe.exists():
+            try:
+                proc = subprocess.Popen(
+                    [str(pyinstaller_exe)],
+                    cwd=str(APP_DIR))
+                print_status("ok", f"Python UI launched (PyInstaller): {pyinstaller_exe.name}")
+                return proc
+            except OSError as e:
+                print_status("warn", f"Cannot launch Python UI executable: {e}")
+
+        # Try 2: Run from source (development mode)
+        tkinter_script = APP_DIR / "32bitscreens" / "tkinter_app.py"
+        if tkinter_script.exists():
+            try:
+                proc = subprocess.Popen(
+                    [sys.executable, str(tkinter_script)],
+                    cwd=str(APP_DIR))
+                print_status("ok", "Python UI launched (tkinter source)")
+                return proc
+            except OSError as e:
+                print_status("warn", f"Cannot launch Tkinter UI: {e}")
+
+        # Both Python UI attempts failed → fall back to headless CLI
+        print_status("warn", "Python UI not available — falling back to headless CLI")
+        os.environ["LANFXPLORER_HEADLESS"] = "1"
+        print_status("info", "Backend running headless. Access API at http://localhost:5000")
+        return None
+
+    # ── 64-bit systems: try Flutter UI ──
     # Platform-specific UI paths, with debug (development) fallback
     if platform.system().lower() == "windows":
         ui_path = APP_DIR / "build" / "windows" / "x64" / "runner" / "Release" / "lanfxplorer.exe"
@@ -168,45 +213,10 @@ def run_ui():
         debug_path = APP_DIR / "build" / "linux" / "x64" / "debug" / "bundle" / "lanfxplorer"
         release_path = APP_DIR / "build" / "linux" / "x64" / "release" / "bundle" / "lanfxplorer"
         ui_path = debug_path if debug_path.exists() else release_path
-    
+
     if not os.path.exists(ui_path):
         print_status("fail", f"UI executable not found: {ui_path}")
         return None
-
-    # Check architecture compatibility (Flutter UI is x64 only)
-    import struct
-    if struct.calcsize("P") * 8 == 32:
-        print_status("info", "32-bit system detected — launching Python UI")
-
-        # Prefer PyInstaller-built executable (ships in release archive)
-        if platform.system().lower().startswith("win"):
-            pyinstaller_exe = APP_DIR / "python_ui" / "python_ui.exe"
-        else:
-            pyinstaller_exe = APP_DIR / "python_ui" / "python_ui"
-
-        if pyinstaller_exe.exists():
-            try:
-                return subprocess.Popen(
-                    [str(pyinstaller_exe)],
-                    cwd=str(APP_DIR))
-            except OSError as e:
-                print_status("warn", f"Cannot launch Python UI executable: {e}")
-
-        # Fallback: run from source (development mode)
-        tkinter_script = APP_DIR / "32bitscreens" / "tkinter_app.py"
-        if tkinter_script.exists():
-            try:
-                return subprocess.Popen(
-                    [sys.executable, str(tkinter_script)],
-                    cwd=str(APP_DIR))
-            except OSError as e:
-                print_status("warn", f"Cannot launch Tkinter UI: {e}")
-                print_status("info", "Backend running headless. Access API at http://localhost:5000")
-                return None
-        else:
-            print_status("warn", "Python UI not found, running headless")
-            print_status("info", "Backend running headless. Access API at http://localhost:5000")
-            return None
 
     print_status("run", "Starting LANFXplorer UI")
     try:
@@ -219,8 +229,9 @@ def run_ui():
 
 def main():
     processes = []
-    
-    # Headless / 32-bit: interactive CLI profile creation before anything else
+
+    # Headless mode: interactive CLI profile creation before anything else
+    # (set by --headless flag, or dynamically by run_ui() when Python UI fails)
     if os.environ.get("LANFXPLORER_HEADLESS"):
         from cli_profile import ensure_profile
         if not ensure_profile():
@@ -345,7 +356,16 @@ def main():
         processes.append(("UI", ui_proc))
         ui_proc.wait()
     else:
-        # No UI (32-bit or missing binary) — run headless, wait for Ctrl+C
+        # No UI — run headless, wait for Ctrl+C
+        # If headless was set dynamically (e.g. Python UI failed on 32-bit),
+        # run CLI profile creation now before going into headless loop
+        if os.environ.get("LANFXPLORER_HEADLESS") and not os.environ.get("_PROFILE_DONE"):
+            from cli_profile import ensure_profile
+            if not ensure_profile():
+                print_status("fail", "Profile creation cancelled — exiting")
+                return
+            os.environ["_PROFILE_DONE"] = "1"
+
         print_status("info", "Running in headless mode. Press Ctrl+C to stop.")
         try:
             while True:

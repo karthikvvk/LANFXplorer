@@ -3,7 +3,7 @@ setlocal EnableDelayedExpansion
 
 REM =================================================
 REM LANFXplorer — Unified Application Launcher
-REM Supports 64-bit (with UI) & 32-bit (headless)
+REM 64-bit: Flutter UI  |  32-bit: Python UI → headless
 REM =================================================
 
 REM -------------------------------------------------
@@ -65,7 +65,8 @@ set "ARCH_BITS=64"
 if "%PROCESSOR_ARCHITECTURE%"=="x86" (
     if not defined PROCESSOR_ARCHITEW6432 (
         set "ARCH_BITS=32"
-        set "FORCE_HEADLESS=1"
+        REM 32-bit: Flutter UI won't work (x64 only) but main.py will
+        REM try Python UI (tkinter) first, then fall back to headless CLI
         set "OPENSSL_PATH=C:\Program Files (x86)\OpenSSL-Win32\bin\openssl.exe"
     )
 )

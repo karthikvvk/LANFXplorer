@@ -129,7 +129,8 @@ def build_python_ui():
 
     result = subprocess.run(cmd, cwd=ROOT)
     if result.returncode != 0:
-        print("[!] PyInstaller build failed!")
+        print("[!] PyInstaller build failed! Do 'pip install pyinstaller' and try again")
+        exit()
         return None
 
     exe_path = os.path.join(dist_dir, PYTHON_UI_EXE_NAME)
