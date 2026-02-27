@@ -398,7 +398,7 @@ class LoginPage(tk.Frame):
 
         # ── Troubleshoot Connection ──
         self._troubleshoot_btn = tk.Button(col,
-                                    text="\ud83d\udd27  Troubleshoot Connection",
+                                    text="🔧  Troubleshoot Connection",
                                     command=self._show_troubleshoot,
                                     font=("Segoe UI", 10),
                                     bg=c("bg"), fg=c("accent"),
