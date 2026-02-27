@@ -15,17 +15,17 @@ APPBUILD = os.path.join(ROOT, "LANFXplorer")
 SYSTEM = platform.system().lower()
 date = datetime.datetime.now().strftime("%Y-%m-%d")
 
-# # Detect OS and build accordingly
-# try:
-#     os.system("flutter")
-#     if SYSTEM.startswith("win"):
-#         print("[*] Building for Windows...")
-#         os.system("flutter clean && flutter pub get && flutter build windows --release")
-#     else:
-#         print("[*] Building for Linux...")
-#         os.system("flutter clean && flutter pub get && flutter build linux --release")
-# except:
-#     print("flutter not found")
+# Detect OS and build accordingly
+try:
+    os.system("flutter")
+    if SYSTEM.startswith("win"):
+        print("[*] Building for Windows...")
+        os.system("flutter clean && flutter pub get && flutter build windows --release")
+    else:
+        print("[*] Building for Linux...")
+        os.system("flutter clean && flutter pub get && flutter build linux --release")
+except:
+    print("flutter not found")
 
 # Files and directories to include
 ITEMS = [
@@ -141,106 +141,145 @@ def build_python_ui():
         return None
 
 
-# DISABLED: Log commenting functionality
-# def comment_out_logs(file_path):
-#     """
-#     Comment out console.log and print statements in a file.
-#     Handles JavaScript/TypeScript (.js, .ts, .jsx, .tsx), Python (.py), and Dart (.dart) files.
-#     """
-#     # Determine file extension
-#     ext = os.path.splitext(file_path)[1].lower()
-#     
-#     # Skip non-code files
-#     if ext not in ['.js', '.ts', '.jsx', '.tsx', '.py', '.dart']:
-#         return False
-#     
-#     try:
-#         with open(file_path, 'r', encoding='utf-8') as f:
-#             content = f.read()
-#     except Exception as e:
-#         print(f"[!] Could not read {file_path}: {e}")
-#         return False
-#     
-#     original_content = content
-#     modified = False
-#     
-#     if ext in ['.js', '.ts', '.jsx', '.tsx', '.dart']:
-#         # Comment out console.log (but NOT console.error, console.warn, etc.)
-#         # Match console.log with various whitespace patterns
-#         lines = content.split('\n')
-#         new_lines = []
-#         
-#         for line in lines:
-#             # Check if line contains console.log (not already commented)
-#             if 'console.log' in line and not line.strip().startswith('//'):
-#                 # Make sure it's actually console.log and not console.error, etc.
-#                 if re.search(r'\bconsole\.log\s*\(', line):
-#                     # Comment it out
-#                     new_lines.append('//' + line)
-#                     modified = True
-#                 else:
-#                     new_lines.append(line)
-#             else:
-#                 new_lines.append(line)
-#         
-#         content = '\n'.join(new_lines)
-#     
-#     if ext == '.py' or ext == '.dart':
-#         # Comment out print statements (not already commented)
-#         lines = content.split('\n')
-#         new_lines = []
-#         
-#         for line in lines:
-#             # Check if line contains print( and is not already commented
-#             if ext == '.py':
-#                 comment_char = '#'
-#             else:
-#                 comment_char = '//'
-#             
-#             if not line.strip().startswith(comment_char):
-#                 # Match print( with word boundary to avoid matching substring in function names
-#                 if re.search(r'\bprint\s*\(', line):
-#                     # Comment it out
-#                     new_lines.append(comment_char + line)
-#                     modified = True
-#                 else:
-#                     new_lines.append(line)
-#             else:
-#                 new_lines.append(line)
-#         
-#         content = '\n'.join(new_lines)
-#     
-#     # Write back if modified
-#     if modified and content != original_content:
-#         try:
-#             with open(file_path, 'w', encoding='utf-8') as f:
-#                 f.write(content)
-#             return True
-#         except Exception as e:
-#             print(f"[!] Could not write {file_path}: {e}")
-#             return False
-#     
-#     return False
+
+def _is_in_except_block_py(lines, current_index):
+    """
+    Walk backwards to determine if the current line is inside a Python except block.
+    Uses indentation to infer block membership.
+    """
+    current_line = lines[current_index]
+    if not current_line.strip():
+        return False
+
+    current_indent = len(current_line) - len(current_line.lstrip())
+
+    for i in range(current_index - 1, -1, -1):
+        line = lines[i]
+        if not line.strip():
+            continue
+        line_indent = len(line) - len(line.lstrip())
+        # Found a line at a lower indent level — check if it opens an except/finally block
+        if line_indent < current_indent:
+            stripped = line.strip()
+            if stripped.startswith(('except', 'finally')):
+                return True
+            # Hit a non-except block opener at lower indent — stop looking
+            return False
+
+    return False
+
+
+def _get_catch_depth(lines, current_index, lang):
+    """
+    For JS/Dart: returns True if the current line is inside a catch/finally block.
+    Scans backwards counting braces and looking for catch/finally keywords.
+    """
+    brace_depth = 0
+    for i in range(current_index, -1, -1):
+        line = lines[i]
+        # Count braces in reverse (closing braces increase depth going backwards)
+        brace_depth += line.count('}') - line.count('{')
+        stripped = line.strip()
+        # When we've closed back to a brace boundary, check if catch/finally opened it
+        if brace_depth <= 0 and re.search(r'\b(catch|finally)\b', stripped):
+            return True
+        if brace_depth < 0:
+            # We've exited the enclosing block entirely
+            return False
+    return False
+
+
+def comment_out_logs(file_path):
+    """
+    Comment out console.log and print statements in a file.
+    Skips statements inside except/catch/finally blocks.
+    Handles JavaScript/TypeScript (.js, .ts, .jsx, .tsx), Python (.py), and Dart (.dart) files.
+    """
+    ext = os.path.splitext(file_path)[1].lower()
+
+    if ext not in ['.js', '.ts', '.jsx', '.tsx', '.py', '.dart']:
+        return False
+
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except Exception as e:
+        print(f"[!] Could not read {file_path}: {e}")
+        return False
+
+    original_content = content
+    modified = False
+
+    lines = content.split('\n')
+    new_lines = []
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+
+        if ext in ['.js', '.ts', '.jsx', '.tsx', '.dart']:
+            comment_char = '//'
+            already_commented = stripped.startswith('//')
+            has_log = re.search(r'\bconsole\.log\s*\(', line) if ext != '.dart' else None
+            has_print = re.search(r'\bprint\s*\(', line) if ext == '.dart' else None
+
+            should_comment = (
+                not already_commented
+                and (has_log or has_print)
+                and not _get_catch_depth(lines, i, lang='js')
+            )
+
+        elif ext == '.py':
+            comment_char = '#'
+            already_commented = stripped.startswith('#')
+            has_print = re.search(r'\bprint\s*\(', line)
+
+            should_comment = (
+                not already_commented
+                and has_print
+                and not _is_in_except_block_py(lines, i)
+            )
+
+        else:
+            should_comment = False
+
+        if should_comment:
+            new_lines.append(comment_char + line)
+            modified = True
+        else:
+            new_lines.append(line)
+
+    content = '\n'.join(new_lines)
+
+    if modified and content != original_content:
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            return True
+        except Exception as e:
+            print(f"[!] Could not write {file_path}: {e}")
+            return False
+
+    return False
 
 
 # DISABLED: Process directory function
-# def process_directory(directory):
-#     """
-#     Recursively process all files in a directory and comment out console.log and print statements.
-#     """
-#     files_modified = 0
-#     
-#     for root, dirs, files in os.walk(directory):
-#         # Skip node_modules, .git, and other common directories
-#         dirs[:] = [d for d in dirs if d not in ['node_modules', '.git', '.dart_tool', 'build', '.idea']]
-#         
-#         for file in files:
-#             file_path = os.path.join(root, file)
-#             if comment_out_logs(file_path):
-#                 files_modified += 1
-#                 print(f"[*] Commented logs in: {os.path.relpath(file_path, directory)}")
-#     
-#     return files_modified
+def process_directory(directory):
+    """
+    Recursively process all files in a directory and comment out console.log and print statements.
+    """
+    files_modified = 0
+    
+    for root, dirs, files in os.walk(directory):
+        # Skip node_modules, .git, and other common directories
+        dirs[:] = [d for d in dirs if d not in ['node_modules', '.git', '.dart_tool', 'build', '.idea']]
+        
+        # for file in files:
+        #     file_path = os.path.join(root, file)
+        #     if comment_out_logs(file_path):
+        #         files_modified += 1
+        #         print(f"[*] Commented logs in: {os.path.relpath(file_path, directory)}")
+    
+    return files_modified
 
 
 def get_version_from_pubspec():
@@ -257,35 +296,35 @@ def main():
         shutil.rmtree(APPBUILD)
     os.makedirs(APPBUILD)
 
-    # # Copy listed items
-    # for item in ITEMS:
-    #     src = os.path.join(ROOT, item)
-    #     dst = os.path.join(APPBUILD, item)
+    # Copy listed items
+    for item in ITEMS:
+        src = os.path.join(ROOT, item)
+        dst = os.path.join(APPBUILD, item)
 
-    #     if os.path.isdir(src):
-    #         shutil.copytree(src, dst)
-    #     else:
-    #         shutil.copy2(src, dst)
+        if os.path.isdir(src):
+            shutil.copytree(src, dst)
+        else:
+            shutil.copy2(src, dst)
 
-    # # Copy flutter bundle - maintain full directory structure
-    # if SYSTEM.startswith("win"):
-    #     bundle_dest = os.path.join(APPBUILD, "build", "windows", "runner", "Release")
-    # else:
-    #     bundle_dest = os.path.join(APPBUILD, "build", "linux", "x64", "release", "bundle")
-    # shutil.copytree(
-    #     ROOT + FLUTTER_BUNDLE_SRC,
-    #     bundle_dest,
-    #     dirs_exist_ok=True,
-    # )
+    # Copy flutter bundle - maintain full directory structure
+    if SYSTEM.startswith("win"):
+        bundle_dest = os.path.join(APPBUILD, "build", "windows", "runner", "Release")
+    else:
+        bundle_dest = os.path.join(APPBUILD, "build", "linux", "x64", "release", "bundle")
+    shutil.copytree(
+        ROOT + FLUTTER_BUNDLE_SRC,
+        bundle_dest,
+        dirs_exist_ok=True,
+    )
 
-    # # Copy built executable to root directory for easy trial runs
-    # executable_src = os.path.join(ROOT + FLUTTER_BUNDLE_SRC, EXECUTABLE_NAME)
-    # executable_dst = os.path.join(ROOT, EXECUTABLE_NAME)
-    # if os.path.exists(executable_src):
-    #     shutil.copy2(executable_src, executable_dst)
-    #     print(f"[*] Copied {EXECUTABLE_NAME} to root directory for easy testing")
-    # else:
-    #     print(f"[!] Warning: Executable not found at {executable_src}")
+    # Copy built executable to root directory for easy trial runs
+    executable_src = os.path.join(ROOT + FLUTTER_BUNDLE_SRC, EXECUTABLE_NAME)
+    executable_dst = os.path.join(ROOT, EXECUTABLE_NAME)
+    if os.path.exists(executable_src):
+        shutil.copy2(executable_src, executable_dst)
+        print(f"[*] Copied {EXECUTABLE_NAME} to root directory for easy testing")
+    else:
+        print(f"[!] Warning: Executable not found at {executable_src}")
 
     # --- Build and include Python UI (PyInstaller) ---
     python_ui_exe = build_python_ui()
@@ -298,40 +337,40 @@ def main():
         print("[!] Warning: Python UI executable not included in archive")
 
     # Cleanup temporary python_build directory
-    # if os.path.exists(PYTHON_BUILD_DIR):
-    #     shutil.rmtree(PYTHON_BUILD_DIR)
-    #     print(f"[*] Cleaned up temporary python_build directory")
+    if os.path.exists(PYTHON_BUILD_DIR):
+        shutil.rmtree(PYTHON_BUILD_DIR)
+        print(f"[*] Cleaned up temporary python_build directory")
 
     # DISABLED: Comment out console.log and print statements
-    # print("\n[*] Commenting out console.log and print statements...")
-    # files_modified = process_directory(APPBUILD)
-    # print(f"[*] Modified {files_modified} files")
+    print("\n[*] Commenting out console.log and print statements...")
+    files_modified = process_directory(APPBUILD)
+    print(f"[*] Modified {files_modified} files")
 
     # Read version
     version = get_version_from_pubspec()
     
-    # # Create archive based on OS
-    # if SYSTEM.startswith("win"):
-    #     # Create zip for Windows
-    #     archive_name = f"{SYSTEM}_{date}_{version}.zip"
-    #     with zipfile.ZipFile(archive_name, "w", zipfile.ZIP_DEFLATED) as zipf:
-    #         for root, dirs, files in os.walk(APPBUILD):
-    #             for file in files:
-    #                 file_path = os.path.join(root, file)
-    #                 arcname = os.path.join("LANFXplorer", os.path.relpath(file_path, APPBUILD))
-    #                 zipf.write(file_path, arcname)
-    #     print(f"[*] Created archive: {archive_name}")
-    # else:
-    #     # Create tar.gz for Linux
-    #     archive_name = f"{SYSTEM}_{date}_{version}.tar.gz"
-    #     with tarfile.open(archive_name, "w:gz") as tar:
-    #         tar.add(APPBUILD, arcname="LANFXplorer")
-    #     print(f"[*] Created archive: {archive_name}")
+    # Create archive based on OS
+    if SYSTEM.startswith("win"):
+        # Create zip for Windows
+        archive_name = f"{SYSTEM}_{date}_{version}.zip"
+        with zipfile.ZipFile(archive_name, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(APPBUILD):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.join("LANFXplorer", os.path.relpath(file_path, APPBUILD))
+                    zipf.write(file_path, arcname)
+        print(f"[*] Created archive: {archive_name}")
+    else:
+        # Create tar.gz for Linux
+        archive_name = f"{SYSTEM}_{date}_{version}.tar.gz"
+        with tarfile.open(archive_name, "w:gz") as tar:
+            tar.add(APPBUILD, arcname="LANFXplorer")
+        print(f"[*] Created archive: {archive_name}")
 
-    # # Cleanup: Delete the temporary LANFXplorer directory used for building
-    # if os.path.exists(APPBUILD):
-    #     shutil.rmtree(APPBUILD)
-    #     print(f"[*] Cleaned up temporary build directory: {APPBUILD}")
+    # Cleanup: Delete the temporary LANFXplorer directory used for building
+    if os.path.exists(APPBUILD):
+        shutil.rmtree(APPBUILD)
+        print(f"[*] Cleaned up temporary build directory: {APPBUILD}")
 
     # Output release instructions for the user
     print("\n" + "=" * 60)
