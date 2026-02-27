@@ -156,7 +156,118 @@ class _TroubleshootDialogState extends State<TroubleshootDialog> {
                           'This requires administrator / sudo privileges.',
                     ),
 
-                    const SizedBox(height: AppSpacing.lg),
+                    const SizedBox(height: AppSpacing.md),
+
+                    // ── Advanced Options (collapsible) ──
+                    Theme(
+                      data: Theme.of(context).copyWith(
+                        dividerColor: Colors.transparent,
+                      ),
+                      child: ExpansionTile(
+                        tilePadding: EdgeInsets.zero,
+                        childrenPadding: const EdgeInsets.only(
+                          bottom: AppSpacing.md,
+                        ),
+                        leading: Icon(
+                          Icons.settings_suggest,
+                          color: colorScheme.tertiary,
+                          size: 22,
+                        ),
+                        title: Text(
+                          'Advanced Options',
+                          style: context.textStyles.titleSmall?.copyWith(
+                            color: colorScheme.tertiary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        children: [
+                          // ── Diagnostic Checks ──
+                          Padding(
+                            padding: const EdgeInsets.only(
+                              bottom: AppSpacing.sm,
+                              top: AppSpacing.xs,
+                            ),
+                            child: Text(
+                              'Network Diagnostic Checks',
+                              style: context.textStyles.labelMedium?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                          _AdvancedCheckTile(
+                            icon: Icons.wifi_lock,
+                            title: 'Check AP Isolation',
+                            description:
+                                'If devices can\'t see each other despite being on '
+                                'the same Wi-Fi, AP (Access Point) isolation may be '
+                                'enabled on your router. This blocks all '
+                                'device-to-device traffic.',
+                          ),
+                          _AdvancedCheckTile(
+                            icon: Icons.security,
+                            title: 'DDoS Prevention Limits',
+                            description:
+                                'Some routers cap UDP & TCP connections per device. '
+                                'LANFXplorer requires the limit set to >200 for '
+                                'reliable peer discovery and file transfer.',
+                          ),
+                          _AdvancedCheckTile(
+                            icon: Icons.router,
+                            title: 'NAT Limitation',
+                            description:
+                                'Double NAT or strict NAT (common in VMs, '
+                                'enterprise networks, and carrier-grade NAT) can '
+                                'block peer-to-peer traffic even when both devices '
+                                'have internet access.',
+                          ),
+
+                          const SizedBox(height: AppSpacing.md),
+                          const Divider(height: 1),
+                          const SizedBox(height: AppSpacing.md),
+
+                          // ── Common Fixes ──
+                          Padding(
+                            padding: const EdgeInsets.only(
+                              bottom: AppSpacing.sm,
+                            ),
+                            child: Text(
+                              'Common Fixes',
+                              style: context.textStyles.labelMedium?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                          _FixTile(
+                            number: 1,
+                            text: 'Use a mobile hotspot — simplest test that '
+                                'bypasses all router configuration issues.',
+                          ),
+                          _FixTile(
+                            number: 2,
+                            text: 'Disable AP-Isolation & UPnP in your router '
+                                'admin panel (usually under Wireless / '
+                                'Advanced settings).',
+                          ),
+                          _FixTile(
+                            number: 3,
+                            text: 'Set DDoS connection limit to >200 in router '
+                                'settings (Security / DoS Protection).',
+                          ),
+                          _FixTile(
+                            number: 4,
+                            text:
+                                'Use Bridged / NON-NAT network mode if running '
+                                'inside a VM (VirtualBox, VMware, etc.).',
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: AppSpacing.md),
 
                     // ── Result message ──
                     if (_resultMessage != null)
@@ -328,5 +439,113 @@ class _StepTile extends StatelessWidget {
           begin: 0.05,
           end: 0,
         );
+  }
+}
+
+/// A diagnostic check tile used inside the Advanced Options section.
+class _AdvancedCheckTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String description;
+
+  const _AdvancedCheckTile({
+    required this.icon,
+    required this.title,
+    required this.description,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        border: Border.all(
+          color: colorScheme.outline.withValues(alpha: 0.15),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: colorScheme.tertiary),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: context.textStyles.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  description,
+                  style: context.textStyles.bodySmall?.withColor(
+                    colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A numbered common-fix suggestion tile.
+class _FixTile extends StatelessWidget {
+  final int number;
+  final String text;
+
+  const _FixTile({
+    required this.number,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 22,
+            height: 22,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: colorScheme.tertiary.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Text(
+              '$number',
+              style: TextStyle(
+                color: colorScheme.tertiary,
+                fontWeight: FontWeight.bold,
+                fontSize: 11,
+              ),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              text,
+              style: context.textStyles.bodySmall?.withColor(
+                colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

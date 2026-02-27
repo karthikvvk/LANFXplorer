@@ -3,20 +3,21 @@ import os
 import subprocess
 import platform
 import re
-import threading
 import asyncio
 from ipaddress import IPv4Network, IPv4Address
 import concurrent.futures
-from typing import List
+from typing import List, Set, Optional, Dict
 from dotenv import load_dotenv
 import requests
 import socket
 import time
+import sys
 
 # Import centralized configuration
 from app_config import AppConfig
 
 
+# ==================== GLOBAL STATE ====================
 host_ip = ""
 cidr = ""
 gateway = ""
@@ -30,39 +31,43 @@ dest_host = ""
 file_path = ""
 
 
+# ==================== UTILITY FUNCTIONS ====================
 
-
-def check_subnet(ip, host_ip):
-
+def check_subnet(ip: str, host_ip: str) -> bool:
+    """Check if an IP is on the same subnet as host_ip, excluding gateway/broadcast/special."""
     if not host_ip:
         raise ValueError("HOST environment variable not set")
 
     ip_parts = ip.strip().split('.')
     default_parts = host_ip.strip().split('.')
     ed = ip_parts[-1]
-    
+
     if ed == '1' or ed == "200" or ed == "255":
         return False
-    
+
     return ip_parts[:-1] == default_parts[:-1]
 
-def get_OS_TYPE(REMOTE_HOST=""):
+
+def get_OS_TYPE(REMOTE_HOST: str = "") -> Dict:
+    """Query a remote host for its OS type and username via the app's API."""
     try:
-        response = requests.post(f"http://{REMOTE_HOST}:5000/osinfo", 
-                                json={"request": "osinfo"})
+        response = requests.post(f"http://{REMOTE_HOST}:5000/osinfo",
+                                json={"request": "osinfo"}, timeout=3)
         if response.status_code == 200:
             data = response.json()
             return {"os": data.get("os", "linux"), "user": data.get("user")}
         else:
             return {"os": "linux", "user": None}
-    except:
+    except Exception:
         return {"os": "linux", "user": None}
 
+
 def update_env():
+    """Load environment variables from .env file."""
     global gateway, cidr, file_path, host_ip, broadcast, system_name, interface, user, pwd, dest_host
-    
+
     load_dotenv()
-    
+
     host_ip = os.getenv("HOST", "")
     cidr = os.getenv("CIDR", "24")
     gateway = os.getenv("GATEWAY", "")
@@ -73,55 +78,290 @@ def update_env():
     user = os.getenv("USER", getpass.getuser())
     pwd = os.getenv("PWD", os.getcwd())
     dest_host = os.getenv("DEST_HOST", "")
-    
+
     print(f"[+] Loaded scanner's environment variables")
     print(f"    Network: {gateway}/{cidr}")
     print(f"    Interface: {interface}")
     print(f"    System: {system_name}")
 
-def checkfile():
-    global gateway, cidr, file_path, host_ip, broadcast, system_name, interface, user, pwd, dest_host
-    if not os.path.exists(file_path):
-        open(file_path, "w").close()
-        print(f"[+] Created {file_path}")
 
-def gethostlist():
-    global gateway, cidr, file_path, host_ip, broadcast, system_name, interface, user, pwd, dest_host
-    
+# ==================== STEP 1 & 3: ARP CACHE READING ====================
+
+def read_arp_cache() -> Set[str]:
+    """
+    Read the ARP cache to get known neighbor IPs.
+    Uses 'ip neigh' on Linux, 'arp -a' on Windows/macOS.
+    """
+    system = platform.system().lower()
+    ips = set()
+
+    try:
+        if system == "linux":
+            result = subprocess.run(
+                ["ip", "neigh"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                # Parse lines like: "192.168.1.5 dev wlan0 lladdr aa:bb:cc:dd:ee:ff REACHABLE"
+                for line in result.stdout.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    # Skip entries marked FAILED (no valid ARP response)
+                    if "FAILED" in line.upper():
+                        continue
+                    match = re.match(r'(\d{1,3}(?:\.\d{1,3}){3})', line)
+                    if match:
+                        ips.add(match.group(1))
+        else:
+            # Windows / macOS: arp -a
+            result = subprocess.run(
+                ["arp", "-a"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                found = re.findall(r'(\d{1,3}(?:\.\d{1,3}){3})', result.stdout)
+                ips.update(found)
+    except Exception as e:
+        print(f"[!] ARP cache read failed: {e}", file=sys.stderr)
+
+    return ips
+
+
+# ==================== STEP 2: PING SWEEP ====================
+
+def _ping_one(ip: str) -> Optional[str]:
+    """
+    Ping a single IP with a short timeout.
+    Returns the IP if reachable, None otherwise.
+    This populates the system's ARP cache as a side effect.
+    """
+    system = platform.system().lower()
+    try:
+        if system == "linux":
+            res = subprocess.run(
+                ["ping", "-c", "1", "-W", "1", ip],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=2
+            )
+        else:
+            # Windows
+            res = subprocess.run(
+                ["ping", "-n", "1", "-w", "200", ip],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=2
+            )
+        return ip if res.returncode == 0 else None
+    except Exception:
+        return None
+
+
+def ping_sweep_subnet(host_ip: str, cidr: str = "24") -> Set[str]:
+    """
+    Ping sweep the entire subnet to discover reachable hosts
+    and populate the ARP cache for subsequent reads.
+    Uses threaded parallel pings with short timeouts.
+    """
+    if not host_ip:
+        print("[!] Cannot ping sweep: no host IP set", file=sys.stderr)
+        return set()
+
+    try:
+        gateway_ip = host_ip
+        network = IPv4Network(f"{gateway_ip}/{cidr}", strict=False)
+    except Exception as e:
+        print(f"[!] Invalid network for ping sweep: {e}", file=sys.stderr)
+        return set()
+
+    ip_list = [str(ip) for ip in network.hosts()]
+
+    # Cap at reasonable size to avoid excessive pinging
+    if len(ip_list) > 1024:
+        ip_list = ip_list[:1024]
+
+    print(f"[*] Ping sweeping {len(ip_list)} addresses in {network}...")
+
+    alive = set()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
+        futures = {executor.submit(_ping_one, ip): ip for ip in ip_list}
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            if result:
+                alive.add(result)
+
+    print(f"[+] Ping sweep found {len(alive)} reachable hosts")
+    return alive
+
+
+# ==================== STEP 4: PER-HOST APP PROBE ====================
+
+def probe_peer(ip: str, timeout: float = 2.0) -> Optional[str]:
+    """
+    Send a WHO_IS_PEER UDP message to a single IP and wait for I_AM_PEER response.
+    Returns the peer's reported IP if it responds, None otherwise.
+    """
+    config = AppConfig()
+    DISCOVERY_PORT = config.PEER_DISCOVERY_PORT
+    PEER_DISCOVERY_MSG = config.PEER_DISCOVERY_MSG
+    PEER_RESPONSE_PREFIX = config.PEER_RESPONSE_PREFIX
+
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(timeout)
+
+        sock.sendto(PEER_DISCOVERY_MSG, (ip, DISCOVERY_PORT))
+
+        try:
+            data, addr = sock.recvfrom(4096)
+            if data.startswith(PEER_RESPONSE_PREFIX):
+                parts = data.decode().split()
+                if len(parts) >= 2:
+                    return parts[1]
+                return addr[0]
+        except socket.timeout:
+            return None
+
+        sock.close()
+    except Exception:
+        return None
+
+    return None
+
+
+def probe_peers_batch(ips: Set[str], timeout: float = 1.5) -> Set[str]:
+    """
+    Probe multiple IPs in parallel via threadpool to find which ones
+    are running the LANFXplorer app (respond to WHO_IS_PEER).
+    """
+    verified = set()
+
+    if not ips:
+        return verified
+
+    print(f"[*] Probing {len(ips)} hosts for app broadcast response...")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
+        futures = {executor.submit(probe_peer, ip, timeout): ip for ip in ips}
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            if result:
+                verified.add(result)
+
+    print(f"[+] {len(verified)} hosts responded to app probe")
+    return verified
+
+
+# ==================== MAIN DISCOVERY: gethostlist ====================
+
+def gethostlist() -> List[Dict]:
+    """
+    Multi-step peer discovery:
+      1. Read ARP cache (ip neigh / arp -a) — instant, no traffic
+      2. Ping sweep the subnet to populate ARP cache — brief network activity
+      3. Re-read ARP cache to pick up newly discovered hosts
+      4. Probe each candidate with WHO_IS_PEER UDP — verify app is running
+      5. For verified peers, fetch OS info via /osinfo API
+
+    Returns list of dicts: [{"host": ip, "user": username, "os": os_type}, ...]
+    """
+    global host_ip, cidr
+
     update_env()
-    host_list = scan_peers_udp()
+
+    if not host_ip:
+        print("[!] HOST not set — cannot scan", file=sys.stderr)
+        return []
+
+    # ── Step 1: Quick ARP cache read (what we already know) ──
+    print("[*] Step 1: Reading ARP cache...")
+    arp_hosts = read_arp_cache()
+    print(f"    Found {len(arp_hosts)} entries in ARP cache")
+
+    # ── Step 2: Ping sweep to fire up the network ──
+    print("[*] Step 2: Ping sweep to discover reachable hosts...")
+    ping_hosts = ping_sweep_subnet(host_ip, cidr)
+
+    # ── Step 3: Re-read ARP cache (picks up new entries from ping) ──
+    print("[*] Step 3: Re-reading ARP cache after ping sweep...")
+    arp_hosts_refreshed = read_arp_cache()
+    print(f"    ARP cache now has {len(arp_hosts_refreshed)} entries")
+
+    # Combine all discovered IPs
+    all_candidates = arp_hosts | ping_hosts | arp_hosts_refreshed
+
+    # Filter to same subnet and exclude self/gateway/broadcast
+    subnet_candidates = set()
+    for ip in all_candidates:
+        if ip == host_ip:
+            continue
+        try:
+            if check_subnet(ip, host_ip):
+                subnet_candidates.add(ip)
+        except ValueError:
+            continue
+
+    print(f"[*] {len(subnet_candidates)} subnet candidates after filtering")
+
+    # ── Step 4: Probe each host for app broadcast response ──
+    print("[*] Step 4: Probing candidates for LANFXplorer app...")
+    verified_peers = probe_peers_batch(subnet_candidates)
+
+    # Also try a general UDP broadcast (catches peers missed by unicast)
+    broadcast_peers = scan_peers_udp()
+    for bp in broadcast_peers:
+        if bp != host_ip:
+            verified_peers.add(bp)
+
+    if not verified_peers:
+        print("[!] No LANFXplorer peers found on the network")
+        return []
+
+    # ── Step 5: Get OS info for verified peers ──
+    print(f"[*] Step 5: Fetching OS info for {len(verified_peers)} verified peers...")
     result = []
-    for ip in host_list:
-        subck = check_subnet(ip, host_ip)
-        if subck:
-            res = get_OS_TYPE(ip)
-            username = res.get("user")
-            if username:
-                result.append({"host": ip, "user": username, "os": res.get("os", "linux")})
+    for ip in verified_peers:
+        res = get_OS_TYPE(ip)
+        username = res.get("user")
+        if username:
+            result.append({
+                "host": ip,
+                "user": username,
+                "os": res.get("os", "linux")
+            })
+        else:
+            # Peer responded to WHO_IS_PEER but /osinfo failed —
+            # still include it with unknown info
+            result.append({
+                "host": ip,
+                "user": "unknown",
+                "os": res.get("os", "linux")
+            })
+
+    print(f"[+] Discovery complete: {len(result)} peer(s) found")
     return result
-    
-def scan_peers_udp(network=None):
-    """Scan for peers using UDP broadcast."""
-    global gateway, cidr, file_path, host_ip, broadcast, system_name, interface, user, pwd, dest_host
-    
-    # Use centralized constants from AppConfig
+
+
+# ==================== UDP BROADCAST SCAN (kept as utility) ====================
+
+def scan_peers_udp(network=None) -> List[str]:
+    """Scan for peers using UDP broadcast. Used as a supplementary method."""
     config = AppConfig()
     DISCOVERY_PORT = config.PEER_DISCOVERY_PORT
     PEER_DISCOVERY_MSG = config.PEER_DISCOVERY_MSG
     PEER_RESPONSE_PREFIX = config.PEER_RESPONSE_PREFIX
     target_broadcast = config.broadcast or '<broadcast>'
-    
+
     found = set()
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         sock.settimeout(2.0)
-        
+
         try:
             sock.sendto(PEER_DISCOVERY_MSG, (target_broadcast, DISCOVERY_PORT))
-        except Exception as e:
+        except Exception:
             pass
-            
+
         start_time = time.time()
         while time.time() - start_time < 2.0:
             try:
@@ -139,41 +379,44 @@ def scan_peers_udp(network=None):
 
         sock.close()
     except Exception as e:
-        print(f"[!] Peer UDP Scan failed: {e}", file=os.sys.stderr)
-        
+        print(f"[!] Peer UDP Scan failed: {e}", file=sys.stderr)
+
     return list(found)
+
+
+# ==================== PEER DISCOVERY LISTENER (CANONICAL) ====================
 
 class PeerDiscoveryListener:
     """Asyncio-based peer discovery listener - CANONICAL implementation."""
-    
+
     # Use centralized constants from AppConfig
     DISCOVERY_PORT = AppConfig.PEER_DISCOVERY_PORT
     PEER_DISCOVERY_MSG = AppConfig.PEER_DISCOVERY_MSG
     PEER_RESPONSE_PREFIX = AppConfig.PEER_RESPONSE_PREFIX
-    
+
     def __init__(self, host_ip: str):
-       
+
         self.host_ip = host_ip
         self.transport = None
         self.protocol = None
-    
+
     class Protocol(asyncio.DatagramProtocol):
-        
+
         def __init__(self, host_ip: str):
             self.host_ip = host_ip
             self.transport = None
-        
+
         def connection_made(self, transport):
             self.transport = transport
-        
+
         def datagram_received(self, data: bytes, addr: tuple):
             if data == PeerDiscoveryListener.PEER_DISCOVERY_MSG:
                 response = f"{PeerDiscoveryListener.PEER_RESPONSE_PREFIX.decode()} {self.host_ip}".encode()
                 self.transport.sendto(response, addr)
-    
+
     async def start(self):
         loop = asyncio.get_running_loop()
-        
+
         # Use reuse_port=True to allow restart without 'address already in use' error
         self.transport, self.protocol = await loop.create_datagram_endpoint(
             lambda: self.Protocol(self.host_ip),
@@ -182,226 +425,15 @@ class PeerDiscoveryListener:
             reuse_port=True  # Allow port reuse on restart
         )
         print(f"[+] Peer Discovery Listener started on port {self.DISCOVERY_PORT}")
-    
+
     def stop(self):
         if self.transport:
             self.transport.close()
             print(f"[+] Peer Discovery Listener stopped")
 
+
 async def start_peer_discovery_listener(host_ip: str) -> PeerDiscoveryListener:
-   
+
     listener = PeerDiscoveryListener(host_ip)
     await listener.start()
     return listener
-
-# ==================== DEPRECATED: ManualScanner ====================
-# NOTE: This class is DEPRECATED and UNUSED. It contains methods defined
-# incorrectly (missing 'self' parameter). Kept for reference only.
-# The active scanning is done by scan_peers_udp() and PeerDiscoveryListener.
-# ===================================================================
-class ManualScanner:
-    """DEPRECATED: This class is not in active use. Methods are incorrectly defined."""
-    
-    def __init__(self):
-        global gateway, cidr, file_path, host_ip, broadcast, system_name, interface, user, pwd, dest_host
-    
-    def scanfromlinux():
-    
-        checkfile()
-
-        if not gateway:
-            print("[!] GATEWAY not set in environment (GATEWAY).", file=os.sys.stderr)
-            return []
-        try:
-            network = f"{gateway}/{cidr}"
-        
-            IPv4Network(network, strict=False)
-        except Exception as e:
-            print(f"[!] Invalid network from GATEWAY/CIDR: {e}", file=os.sys.stderr)
-            return []
-
-        methods = [
-            ("ping_sweep", scan_ping_sweep),
-            ("arp_neigh", scan_arp_table),
-            ("nmap_unprivileged", scan_nmap_unprivileged),
-            # ("udp_broadcast", scan_udp),
-        ]
-        hostset = set()
-        for name, func in methods:
-            try:
-                found = func(network)
-                if found:
-                    hostset.update(found)
-                
-            except Exception as e:
-                print(f"[!] {name} failed: {e}", file=os.sys.stderr)
-                continue
-        if hostset:
-            append_host(hostset)
-            return hostset
-        return []
-
-    def scan_nmap_unprivileged(network: str, ports: str = "22,80,443,445", timeout: int = 120) -> List[str]:
-        try:
-            try:
-                subprocess.run(["nmap", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except FileNotFoundError:
-                return []
-
-            args = ["nmap", "-Pn", "-sT", "-p", ports, "-T4", "--open", network]
-
-            result = subprocess.check_output(args, text=True, stderr=subprocess.STDOUT, timeout=timeout)
-            found = re.findall(r'Nmap scan report for (\d{1,3}(?:\.\d{1,3}){3})', result)
-            unique = sorted(set(found))
-            return unique
-        except subprocess.TimeoutExpired:
-            return []
-        except Exception:
-            return []
-
-    def ping_silent_linux(ip: str) -> None:
-        try:
-            subprocess.run(["ping", "-c", "1", "-W", "1", ip],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
-        except Exception:
-            pass
-
-    def scan_arp_table(network: str) -> List[str]:
-    
-        try:
-            net = IPv4Network(network, strict=False)
-        except Exception:
-            return []
-
-        all_ips = [str(ip) for ip in net]
-
-        if len(all_ips) > 1024:
-            all_ips = all_ips[:1024]
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=50) as ex:
-            list(ex.map(ping_silent_linux, all_ips))
-
-        try:
-            out = subprocess.check_output(["ip", "neigh"], text=True)
-        except Exception:
-            return []
-
-        ips = set(re.findall(r'(\d{1,3}(?:\.\d{1,3}){3})', out))
-        filtered = [ip for ip in sorted(ips) if IPv4Address(ip) in net]
-        return filtered
-
-    def scan_ping_sweep(network: str) -> List[str]:
-        try:
-            net = IPv4Network(network, strict=False)
-        except Exception:
-            return []
-
-        ip_list = [str(ip) for ip in net]
-
-        if len(ip_list) > 4096:
-            ip_list = ip_list[:4096]
-
-        def ping_check(ip: str):
-            try:
-                res = subprocess.run(["ping", "-c", "1", "-W", "1", ip],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
-                return ip if res.returncode == 0 else None
-            except Exception:
-                return None
-
-        alive = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=200) as ex:
-            for r in ex.map(ping_check, ip_list):
-                if r:
-                    alive.append(r)
-        return alive
-
-    def ping_silent(ip):
-        try:
-            subprocess.run(
-                ["ping", "-n", "1", "-w", "100", ip],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except:
-            pass
-
-    def scanfromwin():
-        
-        checkfile()
-        
-        if cidr == "24":
-            base = gateway.rsplit('.', 1)[0] + "."
-            start, end = 1, 255
-        elif cidr == "16":
-            parts = gateway.split('.')
-            base = f"{parts[0]}.{parts[1]}."
-            base = gateway.rsplit('.', 1)[0] + "."
-            start, end = 1, 255
-        else:
-            base = gateway.rsplit('.', 1)[0] + "."
-            start, end = 1, 255
-        
-        print(f"[*] Scanning network: {base}0/{cidr}")
-        print(f"[*] Pinging {end - start} addresses...")
-        
-        threads = []
-        for i in range(start, end + 1):
-            ip = base + str(i)
-            thr = threading.Thread(target=ping_silent, args=(ip,))
-            threads.append(thr)
-        
-        for thr in threads:
-            thr.start()
-        
-        for thr in threads:
-            thr.join()
-        
-        print("[*] Ping sweep complete, checking ARP cache...")
-        
-        try:
-            result = subprocess.run(
-                ["arp", "-a"], 
-                capture_output=True, 
-                text=True,
-                
-            )
-            output = result.stdout
-            
-            ips = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', output)
-            unique_ips = list(set(ips))
-            
-            if cidr == "24":
-                unique_ips = [ip for ip in unique_ips if ip.startswith(base)]
-            
-            print(f"[+] Found {len(unique_ips)} hosts")
-            append_host(unique_ips)
-            return unique_ips
-            
-        except subprocess.TimeoutExpired:
-            print("[!] ARP command timed out")
-            return []
-        except Exception as e:
-            print(f"[!] Error reading ARP table: {e}")
-            return []
-
-    def append_host(lis):
-        
-        checkfile()
-        
-        try:
-            with open(file_path, "r") as fh:
-                data = fh.readlines()
-            
-            existing_ips = set(line.strip() for line in data if line.strip())
-            
-            total_ips = existing_ips.union(lis)
-            
-            with open(file_path, "w") as fh:
-                for ip in sorted(total_ips, key=lambda x: [int(p) for p in x.split('.')]):
-                    fh.write(ip + "\n")
-            
-            print(f"[+] Updated {file_path} with {len(total_ips)} total hosts")
-            
-        except Exception as e:
-            print(f"[!] Error updating host list: {e}")
