@@ -1,0 +1,6 @@
+1. App consider only "laptop/destop" as a END USERS
+2. App considers P2P connection in "NO-Inet" situations
+3. Securities such as PKI, AUTHentication, AUTHORISAtions are not available in "NO-Inet" situations
+4. App considers A "laptop/destop" JUST have 1(ONE) NIC<->Ethernet(RJ45) LINK.
+5. App consider there are no INTERNAL NETWORKS such as Inter-VLAN, Subnets, VLAN HOISTED in the "laptop/desktop"
+6. All these considerations END up in DISABLING of the "security" features promised. Hence RISK is up to USER
