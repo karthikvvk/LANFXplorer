@@ -102,6 +102,18 @@ def build_python_ui():
             mod_name = fname[:-3]  # strip .py
             hidden_imports.extend(["--hidden-import", mod_name])
 
+    # Tkinter and its submodules (PyInstaller often misses these)
+    tkinter_imports = [
+        "tkinter",
+        "tkinter.ttk",
+        "tkinter.filedialog",
+        "tkinter.messagebox",
+        "tkinter.simpledialog",
+        "_tkinter",
+    ]
+    for pkg in tkinter_imports:
+        hidden_imports.extend(["--hidden-import", pkg])
+
     # Third-party packages used by 32bitscreens (e.g. api_client uses requests)
     third_party_imports = [
         "requests",
@@ -113,6 +125,36 @@ def build_python_ui():
     for pkg in third_party_imports:
         hidden_imports.extend(["--hidden-import", pkg])
 
+    # Find ALL site-packages directories where dependencies might live.
+    # The builder may run from a venv (e.g. "virtual/") that only has PyInstaller,
+    # while the actual app dependencies (requests, etc.) live in opt/python39.
+    # We must tell PyInstaller where to find them.
+    extra_paths = []
+    seen_paths = set()
+
+    def _add_path(p):
+        if os.path.isdir(p) and p not in seen_paths:
+            seen_paths.add(p)
+            extra_paths.extend(["--paths", p])
+
+    # 1. The project's bundled Python (opt/python39) — this is where
+    #    requirements.txt packages are installed
+    bundled_py_lib = os.path.join(ROOT, "opt", "python39", "lib")
+    if os.path.isdir(bundled_py_lib):
+        for dirpath, dirnames, filenames in os.walk(bundled_py_lib):
+            if os.path.basename(dirpath) == "site-packages":
+                _add_path(dirpath)
+                print(f"    [paths] Found bundled site-packages: {dirpath}")
+
+    # 2. The current Python's site-packages (fallback)
+    try:
+        import site
+        for sp in site.getsitepackages():
+            _add_path(sp)
+        _add_path(site.getusersitepackages())
+    except Exception:
+        pass
+
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--onefile",
@@ -122,7 +164,7 @@ def build_python_ui():
         "--specpath", spec_dir,
         "--paths", screens_dir,
         "--noconfirm",
-    ] + hidden_imports + [entry_script]
+    ] + extra_paths + hidden_imports + [entry_script]
 
     print(f"[*] Building Python UI with PyInstaller...")
     print(f"    Command: {' '.join(cmd)}")
