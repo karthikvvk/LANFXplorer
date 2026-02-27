@@ -239,29 +239,48 @@ def main():
         def _quick_ping() -> bool:
             """Try to reach the default gateway via ICMP ping (5 s)."""
             gw = None
-            try:
-                # Detect gateway from /proc on Linux
-                with open("/proc/net/route") as f:
-                    for line in f:
-                        parts = line.strip().split()
-                        if len(parts) >= 3 and parts[1] != "00000000":
-                            continue
-                        if parts[1] == "00000000" and parts[0] != "lo":
-                            gw_hex = parts[2]
-                            gw = socket.inet_ntoa(bytes.fromhex(gw_hex)[::-1] if sys.byteorder == "little"
-                                                  else bytes.fromhex(gw_hex))
-                            break
-            except Exception:
-                pass
+            system = platform.system().lower()
+
+            if system != "windows":
+                try:
+                    # Detect gateway from /proc on Linux
+                    with open("/proc/net/route") as f:
+                        for line in f:
+                            parts = line.strip().split()
+                            if len(parts) >= 3 and parts[1] != "00000000":
+                                continue
+                            if parts[1] == "00000000" and parts[0] != "lo":
+                                gw_hex = parts[2]
+                                gw = socket.inet_ntoa(bytes.fromhex(gw_hex)[::-1] if sys.byteorder == "little"
+                                                      else bytes.fromhex(gw_hex))
+                                break
+                except Exception:
+                    pass
+            else:
+                # Windows: parse default gateway from ipconfig
+                try:
+                    r = subprocess.run(["ipconfig"], capture_output=True, text=True, timeout=5)
+                    for line in (r.stdout or "").splitlines():
+                        if "default gateway" in line.lower():
+                            parts = line.split(":")
+                            if len(parts) >= 2:
+                                ip = parts[1].strip()
+                                if ip:
+                                    gw = ip
+                                    break
+                except Exception:
+                    pass
 
             if not gw:
                 # Fallback: try pinging localhost (services should be reachable)
                 gw = "127.0.0.1"
 
             try:
-                r = subprocess.run(
-                    ["ping", "-c", "1", "-W", "5", gw],
-                    capture_output=True, timeout=6)
+                if system == "windows":
+                    cmd = ["ping", "-n", "1", "-w", "5000", gw]
+                else:
+                    cmd = ["ping", "-c", "1", "-W", "5", gw]
+                r = subprocess.run(cmd, capture_output=True, timeout=6)
                 return r.returncode == 0
             except Exception:
                 return False

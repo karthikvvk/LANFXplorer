@@ -70,6 +70,9 @@ REQUIRED_PORTS: List[Tuple[int, str, str, bool]] = [
     (AppConfig.API_PORT,            "tcp", "Flask API (local)",    False),
 ]
 
+# ICMP (ping) is needed for the startup connectivity check
+ICMP_NEEDED = True
+
 ProbeResult = Dict  # typed below for clarity
 
 
@@ -1080,7 +1083,113 @@ def ensure_firewall_rules() -> bool:
             _iptables_add(port, proto, desc)
 
     _print("✓", "Firewall rules configured for LANFXplorer")
+
+    # ── ICMP (ping) ────────────────────────────────────────────
+    if ICMP_NEEDED:
+        _print("ℹ", "Adding ICMP echo (ping) allow rule…")
+        _add_icmp_rule(backend, system)
+
     return True
+
+
+def _add_icmp_rule(backend: Optional[str], system: str) -> None:
+    """Add an allow-rule for ICMP echo (ping) on the detected backend."""
+    if system == "windows":
+        # Windows: allow ICMPv4 echo request (inbound)
+        name = f"{RULE_TAG}_ICMP_echo_in"
+        r = _run(["netsh", "advfirewall", "firewall", "show", "rule", f"name={name}"])
+        if r.returncode == 0 and name in (r.stdout or ""):
+            _print("✓", "netsh: ICMP echo rule already exists")
+            return
+        r = _run([
+            "netsh", "advfirewall", "firewall", "add", "rule",
+            f"name={name}",
+            "dir=in", "action=allow",
+            "protocol=icmpv4", "type=8",
+            "profile=any",
+            f"description={RULE_TAG}: Allow ping (echo request)",
+        ])
+        if r.returncode == 0:
+            _print("✓", "netsh: allowed ICMP echo request")
+        else:
+            _print("✗", f"netsh: ICMP failed: {r.stderr.strip()}")
+        return
+
+    # Linux
+    if backend == "ufw":
+        # ufw doesn't block ICMP by default, but we can ensure it's open
+        # via /etc/ufw/before.rules - just log that ufw allows ping by default
+        _print("✓", "ufw: ICMP echo allowed by default (ufw does not block ping)")
+
+    elif backend == "firewalld":
+        r = _run(["firewall-cmd", "--query-icmp-block=echo-request"])
+        if r.returncode == 0 and "yes" in (r.stdout or "").lower():
+            # ICMP echo is explicitly blocked, remove the block
+            r2 = _run(["firewall-cmd", "--permanent", "--remove-icmp-block=echo-request"])
+            if r2.returncode == 0:
+                _print("✓", "firewalld: removed ICMP echo block")
+                _run(["firewall-cmd", "--reload"])
+            else:
+                _print("✗", f"firewalld: failed to unblock ICMP: {r2.stderr.strip()}")
+        else:
+            _print("✓", "firewalld: ICMP echo not blocked")
+
+    elif backend == "nftables":
+        target = _nft_find_input_chain()
+        if target:
+            table, chain = target
+            # Check if an ICMP accept rule already exists
+            r = _run(["nft", "list", "chain"] + table.split() + [chain])
+            if r.returncode == 0 and RULE_TAG in (r.stdout or "") and "icmp" in (r.stdout or "").lower():
+                _print("✓", f"nft: ICMP rule already exists in {table} {chain}")
+            else:
+                r2 = _run(["nft", "insert", "rule"] + table.split() + [chain,
+                          "ip", "protocol", "icmp", "icmp", "type", "echo-request", "accept",
+                          "comment", f'"{RULE_TAG} ICMP echo"'])
+                if r2.returncode == 0:
+                    _print("✓", f"nft: allowed ICMP echo in {table} {chain}")
+                else:
+                    _print("✗", f"nft: ICMP failed: {r2.stderr.strip()}")
+        else:
+            _print("ℹ", "nft: no input chain found for ICMP rule")
+
+    elif backend == "iptables":
+        # Check if ICMP echo accept already exists
+        r = _run(["iptables-save"])
+        if RULE_TAG in (r.stdout or "") and "icmp" in (r.stdout or "").lower() and "--icmp-type 8" in (r.stdout or ""):
+            _print("✓", "iptables: ICMP echo rule already exists")
+        else:
+            r2 = _run([
+                "iptables", "-I", "INPUT", "1",
+                "-p", "icmp", "--icmp-type", "echo-request",
+                "-j", "ACCEPT",
+                "-m", "comment", "--comment", f"{RULE_TAG} ICMP echo",
+            ])
+            if r2.returncode == 0:
+                _print("✓", "iptables: allowed ICMP echo request")
+            else:
+                _print("✗", f"iptables: ICMP failed: {r2.stderr.strip()}")
+
+    else:
+        _print("ℹ", "No firewall backend — ICMP should be allowed by default")
+
+
+def _remove_icmp_rule(backend: Optional[str], system: str) -> None:
+    """Remove our ICMP allow rules."""
+    if system == "windows":
+        name = f"{RULE_TAG}_ICMP_echo_in"
+        _run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={name}"])
+        return
+
+    if backend == "iptables":
+        _run([
+            "iptables", "-D", "INPUT",
+            "-p", "icmp", "--icmp-type", "echo-request",
+            "-j", "ACCEPT",
+            "-m", "comment", "--comment", f"{RULE_TAG} ICMP echo",
+        ])
+    # nftables rules are cleaned up via _nft_remove_all() which removes by tag
+    # ufw + firewalld: we didn't add explicit rules, just unblocked
 
 
 def remove_firewall_rules() -> None:
@@ -1120,6 +1229,9 @@ def remove_firewall_rules() -> None:
             _iptables_remove(port, proto, desc)
 
     _print("✓", "Removed all LANFXplorer firewall rules")
+
+    # Remove ICMP rule
+    _remove_icmp_rule(backend, "linux")
 
 
 # ╔══════════════════════════════════════════════════════════════╗
