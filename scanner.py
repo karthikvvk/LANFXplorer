@@ -255,12 +255,14 @@ def probe_peers_batch(ips: Set[str], timeout: float = 1.5) -> Set[str]:
 
 def gethostlist() -> List[Dict]:
     """
-    Multi-step peer discovery:
-      1. Read ARP cache (ip neigh / arp -a) — instant, no traffic
-      2. Ping sweep the subnet to populate ARP cache — brief network activity
-      3. Re-read ARP cache to pick up newly discovered hosts
-      4. Probe each candidate with WHO_IS_PEER UDP — verify app is running
-      5. For verified peers, fetch OS info via /osinfo API
+    Multi-step peer discovery — always does full sweep for worst-case coverage.
+
+    Flow:
+      1. Read ARP cache (ip neigh) — instant, what we already know
+      2. Test ARP hosts for app availability (WHO_IS_PEER) — output found peers immediately
+      3. ALWAYS do full ping sweep bruteforce — discovers hosts missed by ARP
+         For each newly found host, probe for app and output immediately
+      4. For all verified peers, fetch OS info
 
     Returns list of dicts: [{"host": ip, "user": username, "os": os_type}, ...]
     """
@@ -272,52 +274,76 @@ def gethostlist() -> List[Dict]:
         print("[!] HOST not set — cannot scan", file=sys.stderr)
         return []
 
-    # ── Step 1: Quick ARP cache read (what we already know) ──
-    print("[*] Step 1: Reading ARP cache...")
+    verified_peers = set()
+
+    # ── Step 1: Read ARP cache (what we already know) ──
+    print("[*] Step 1: Reading ARP cache (ip neigh)...")
     arp_hosts = read_arp_cache()
-    print(f"    Found {len(arp_hosts)} entries in ARP cache")
 
-    # ── Step 2: Ping sweep to fire up the network ──
-    print("[*] Step 2: Ping sweep to discover reachable hosts...")
-    ping_hosts = ping_sweep_subnet(host_ip, cidr)
-
-    # ── Step 3: Re-read ARP cache (picks up new entries from ping) ──
-    print("[*] Step 3: Re-reading ARP cache after ping sweep...")
-    arp_hosts_refreshed = read_arp_cache()
-    print(f"    ARP cache now has {len(arp_hosts_refreshed)} entries")
-
-    # Combine all discovered IPs
-    all_candidates = arp_hosts | ping_hosts | arp_hosts_refreshed
-
-    # Filter to same subnet and exclude self/gateway/broadcast
-    subnet_candidates = set()
-    for ip in all_candidates:
+    # Filter to same subnet, exclude self
+    arp_candidates = set()
+    for ip in arp_hosts:
         if ip == host_ip:
             continue
         try:
             if check_subnet(ip, host_ip):
-                subnet_candidates.add(ip)
+                arp_candidates.add(ip)
         except ValueError:
             continue
 
-    print(f"[*] {len(subnet_candidates)} subnet candidates after filtering")
+    print(f"    {len(arp_candidates)} hosts in ARP cache (same subnet)")
 
-    # ── Step 4: Probe each host for app broadcast response ──
-    print("[*] Step 4: Probing candidates for LANFXplorer app...")
-    verified_peers = probe_peers_batch(subnet_candidates)
+    # ── Step 2: Test ARP hosts for app availability ──
+    if arp_candidates:
+        print("[*] Step 2: Testing ARP hosts for LANFXplorer app...")
+        arp_verified = probe_peers_batch(arp_candidates, timeout=1.5)
+        for peer in arp_verified:
+            print(f"    [FOUND] {peer} — app detected (from ARP cache)")
+            verified_peers.add(peer)
+    else:
+        print("[*] Step 2: No ARP hosts to test, skipping...")
+
+    # ── Step 3: ALWAYS do full ping sweep bruteforce ──
+    # Even if we already found hosts, sweep the entire subnet
+    # to discover hosts not yet in ARP cache (worst-case scenario)
+    print("[*] Step 3: Full ping sweep (bruteforce) of subnet...")
+    sweep_found = ping_sweep_subnet(host_ip, cidr)
+
+    # Find NEW hosts (not already tested from ARP cache)
+    new_candidates = set()
+    for ip in sweep_found:
+        if ip == host_ip:
+            continue
+        try:
+            if check_subnet(ip, host_ip) and ip not in arp_candidates:
+                new_candidates.add(ip)
+        except ValueError:
+            continue
+
+    if new_candidates:
+        print(f"    {len(new_candidates)} NEW hosts found beyond ARP cache")
+        print("[*] Step 3b: Testing new hosts for LANFXplorer app...")
+        new_verified = probe_peers_batch(new_candidates, timeout=1.5)
+        for peer in new_verified:
+            print(f"    [FOUND] {peer} — app detected (from ping sweep)")
+            verified_peers.add(peer)
+    else:
+        print("    No new hosts found beyond ARP cache")
 
     # Also try a general UDP broadcast (catches peers missed by unicast)
+    print("[*] Bonus: UDP broadcast scan...")
     broadcast_peers = scan_peers_udp()
     for bp in broadcast_peers:
-        if bp != host_ip:
+        if bp != host_ip and bp not in verified_peers:
+            print(f"    [FOUND] {bp} — app detected (from broadcast)")
             verified_peers.add(bp)
 
     if not verified_peers:
         print("[!] No LANFXplorer peers found on the network")
         return []
 
-    # ── Step 5: Get OS info for verified peers ──
-    print(f"[*] Step 5: Fetching OS info for {len(verified_peers)} verified peers...")
+    # ── Step 4: Get OS info for verified peers ──
+    print(f"[*] Step 4: Fetching OS info for {len(verified_peers)} verified peers...")
     result = []
     for ip in verified_peers:
         res = get_OS_TYPE(ip)
@@ -329,8 +355,7 @@ def gethostlist() -> List[Dict]:
                 "os": res.get("os", "linux")
             })
         else:
-            # Peer responded to WHO_IS_PEER but /osinfo failed —
-            # still include it with unknown info
+            # Peer responded to WHO_IS_PEER but /osinfo failed
             result.append({
                 "host": ip,
                 "user": "unknown",

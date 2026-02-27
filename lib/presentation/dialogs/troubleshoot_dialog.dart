@@ -54,7 +54,7 @@ class _TroubleshootDialogState extends State<TroubleshootDialog> {
         borderRadius: BorderRadius.circular(AppRadius.lg),
       ),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 520, maxHeight: 680),
+        constraints: const BoxConstraints(maxWidth: 520, maxHeight: 800),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -156,114 +156,134 @@ class _TroubleshootDialogState extends State<TroubleshootDialog> {
                           'This requires administrator / sudo privileges.',
                     ),
 
-                    const SizedBox(height: AppSpacing.md),
+                    const SizedBox(height: AppSpacing.lg),
 
                     // ── Advanced Options (collapsible) ──
-                    Theme(
-                      data: Theme.of(context).copyWith(
-                        dividerColor: Colors.transparent,
+                    Container(
+                      decoration: BoxDecoration(
+                        color: colorScheme.surfaceContainerHighest
+                            .withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(AppRadius.sm),
+                        border: Border.all(
+                          color: colorScheme.outline.withValues(alpha: 0.2),
+                        ),
                       ),
-                      child: ExpansionTile(
-                        tilePadding: EdgeInsets.zero,
-                        childrenPadding: const EdgeInsets.only(
-                          bottom: AppSpacing.md,
+                      child: Theme(
+                        data: Theme.of(context).copyWith(
+                          dividerColor: Colors.transparent,
                         ),
-                        leading: Icon(
-                          Icons.settings_suggest,
-                          color: colorScheme.tertiary,
-                          size: 22,
-                        ),
-                        title: Text(
-                          'Advanced Options',
-                          style: context.textStyles.titleSmall?.copyWith(
-                            color: colorScheme.tertiary,
-                            fontWeight: FontWeight.w600,
+                        child: ExpansionTile(
+                          tilePadding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.md,
                           ),
-                        ),
-                        children: [
-                          // ── Diagnostic Checks ──
-                          Padding(
-                            padding: const EdgeInsets.only(
-                              bottom: AppSpacing.sm,
-                              top: AppSpacing.xs,
+                          childrenPadding: const EdgeInsets.only(
+                            left: AppSpacing.md,
+                            right: AppSpacing.md,
+                            bottom: AppSpacing.md,
+                          ),
+                          leading: Icon(
+                            Icons.settings_suggest,
+                            color: colorScheme.primary,
+                            size: 22,
+                          ),
+                          title: Text(
+                            'Advanced Options',
+                            style: context.textStyles.titleSmall?.copyWith(
+                              color: colorScheme.primary,
+                              fontWeight: FontWeight.w600,
                             ),
-                            child: Text(
-                              'Network Diagnostic Checks',
-                              style: context.textStyles.labelMedium?.copyWith(
-                                color: colorScheme.onSurfaceVariant,
-                                fontWeight: FontWeight.w600,
-                                letterSpacing: 0.5,
+                          ),
+                          children: [
+                            // ── Diagnostic Checks ──
+                            Padding(
+                              padding: const EdgeInsets.only(
+                                bottom: AppSpacing.sm,
+                                top: AppSpacing.xs,
+                              ),
+                              child: Text(
+                                'Network Diagnostic Checks',
+                                style: context.textStyles.labelMedium?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0.5,
+                                ),
                               ),
                             ),
-                          ),
-                          _AdvancedCheckTile(
-                            icon: Icons.wifi_lock,
-                            title: 'Check AP Isolation',
-                            description:
-                                'If devices can\'t see each other despite being on '
-                                'the same Wi-Fi, AP (Access Point) isolation may be '
-                                'enabled on your router. This blocks all '
-                                'device-to-device traffic.',
-                          ),
-                          _AdvancedCheckTile(
-                            icon: Icons.security,
-                            title: 'DDoS Prevention Limits',
-                            description:
-                                'Some routers cap UDP & TCP connections per device. '
-                                'LANFXplorer requires the limit set to >200 for '
-                                'reliable peer discovery and file transfer.',
-                          ),
-                          _AdvancedCheckTile(
-                            icon: Icons.router,
-                            title: 'NAT Limitation',
-                            description:
-                                'Double NAT or strict NAT (common in VMs, '
-                                'enterprise networks, and carrier-grade NAT) can '
-                                'block peer-to-peer traffic even when both devices '
-                                'have internet access.',
-                          ),
-
-                          const SizedBox(height: AppSpacing.md),
-                          const Divider(height: 1),
-                          const SizedBox(height: AppSpacing.md),
-
-                          // ── Common Fixes ──
-                          Padding(
-                            padding: const EdgeInsets.only(
-                              bottom: AppSpacing.sm,
+                            _AdvancedCheckTile(
+                              icon: Icons.wifi_lock,
+                              title: 'Check AP Isolation',
+                              description: 'If devices can\'t see each other '
+                                  'despite being on the same Wi-Fi, '
+                                  'AP (Access Point) isolation may '
+                                  'be enabled on your router. This '
+                                  'blocks all device-to-device '
+                                  'traffic.',
                             ),
-                            child: Text(
-                              'Common Fixes',
-                              style: context.textStyles.labelMedium?.copyWith(
-                                color: colorScheme.onSurfaceVariant,
-                                fontWeight: FontWeight.w600,
-                                letterSpacing: 0.5,
+                            _AdvancedCheckTile(
+                              icon: Icons.security,
+                              title: 'DDoS Prevention Limits',
+                              description: 'Some routers cap UDP & TCP '
+                                  'connections per device. '
+                                  'LANFXplorer requires the limit '
+                                  'set to >200 for reliable peer '
+                                  'discovery and file transfer.',
+                            ),
+                            _AdvancedCheckTile(
+                              icon: Icons.router,
+                              title: 'NAT Limitation',
+                              description: 'Double NAT or strict NAT (common '
+                                  'in VMs, enterprise networks, and '
+                                  'carrier-grade NAT) can block '
+                                  'peer-to-peer traffic even when '
+                                  'both devices have internet '
+                                  'access.',
+                            ),
+
+                            const SizedBox(height: AppSpacing.md),
+                            const Divider(height: 1),
+                            const SizedBox(height: AppSpacing.md),
+
+                            // ── Common Fixes ──
+                            Padding(
+                              padding: const EdgeInsets.only(
+                                bottom: AppSpacing.sm,
+                              ),
+                              child: Text(
+                                'Common Fixes',
+                                style: context.textStyles.labelMedium?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0.5,
+                                ),
                               ),
                             ),
-                          ),
-                          _FixTile(
-                            number: 1,
-                            text: 'Use a mobile hotspot — simplest test that '
-                                'bypasses all router configuration issues.',
-                          ),
-                          _FixTile(
-                            number: 2,
-                            text: 'Disable AP-Isolation & UPnP in your router '
-                                'admin panel (usually under Wireless / '
-                                'Advanced settings).',
-                          ),
-                          _FixTile(
-                            number: 3,
-                            text: 'Set DDoS connection limit to >200 in router '
-                                'settings (Security / DoS Protection).',
-                          ),
-                          _FixTile(
-                            number: 4,
-                            text:
-                                'Use Bridged / NON-NAT network mode if running '
-                                'inside a VM (VirtualBox, VMware, etc.).',
-                          ),
-                        ],
+                            _FixTile(
+                              number: 1,
+                              text: 'Use a mobile hotspot — simplest '
+                                  'test that bypasses all router '
+                                  'configuration issues.',
+                            ),
+                            _FixTile(
+                              number: 2,
+                              text: 'Disable AP-Isolation & UPnP in '
+                                  'router admin panel (usually '
+                                  'under Wireless / Advanced '
+                                  'settings).',
+                            ),
+                            _FixTile(
+                              number: 3,
+                              text: 'Set DDoS connection limit to '
+                                  '>200 in router settings '
+                                  '(Security / DoS Protection).',
+                            ),
+                            _FixTile(
+                              number: 4,
+                              text: 'Use Bridged / NON-NAT network '
+                                  'mode if running inside a VM '
+                                  '(VirtualBox, VMware, etc.).',
+                            ),
+                          ],
+                        ),
                       ),
                     ),
 
