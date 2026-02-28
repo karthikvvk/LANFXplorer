@@ -45,13 +45,11 @@ REM Python not found — download and install
 echo [!] Python not found in PATH.
 echo [+] Downloading Python 3.11.9 installer...
 echo.
-echo IMPORTANT: The Python installer will open in a new window.
-echo Please complete the installation. Make sure to check
-echo "Add Python to PATH" during setup (or note your install path).
+echo [+] The Python installer will open in a new window.
+echo [+] Please complete the installation and enable "Add Python to PATH".
 echo.
-pause
 
-set "PY_INSTALLER=%USERPROFILE%\Downloads\pyth  on_installer.exe"
+set "PY_INSTALLER=%USERPROFILE%\Downloads\python_installer.exe"
 
 powershell -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile '%PY_INSTALLER%'" && (
     echo [+] Python installer downloaded
@@ -106,8 +104,8 @@ if not defined PYTHON_EXE (
     set "PATH=!PY_BIN_DIR!;!PY_SCRIPTS_DIR!;%PATH%"
 
     REM Persist paths for app.bat
-    echo !PY_BIN_DIR!>  "%APP_DIR%\.python_bin_dir"
-    echo !PY_SCRIPTS_DIR!> "%APP_DIR%\.python_scripts_dir"
+    @REM echo !PY_BIN_DIR!>  "%APP_DIR%\.python_bin_dir"
+    @REM echo !PY_SCRIPTS_DIR!> "%APP_DIR%\.python_scripts_dir"
     goto :python_found
 )
 
@@ -136,12 +134,9 @@ set "SYSTEM_SSL_PATH=C:\Program Files\OpenSSL-Win64\bin\openssl.exe"
 if not exist "%SYSTEM_SSL_PATH%" (
     echo [+] Installing OpenSSL 3.5.5 LTS to system (Program Files)
     echo.
-    echo IMPORTANT: The OpenSSL installer will open in a new window.
-    echo You MUST accept the license agreement to continue installation.
-    echo The installer will install to: C:\Program Files\OpenSSL-Win64
-    echo If you cancel or reject, the installation will fail.
+    echo [+] The OpenSSL installer will open in a new window.
+    echo [+] Please accept the license and keep the default install path.
     echo.
-    pause
 
     set "DOWNLOAD_PATH=%USERPROFILE%\Downloads\openssl_installer.exe"
 
@@ -223,8 +218,6 @@ powershell -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('%S
 REM ===============================
 REM Mark install complete
 REM ===============================
-@REM type nul > "%APP_DIR%\.installed"
-
 echo.
 echo ================================================
 echo [OK] Installation completed successfully!
@@ -235,13 +228,8 @@ echo    Desktop shortcut created
 echo ================================================
 echo.
 
-
 echo [+] Launching LANFXplorer...
 
 start "" "%APP_DIR%\app.exe"
 
-exit /b 0
-
-
-pause
 exit /b 0

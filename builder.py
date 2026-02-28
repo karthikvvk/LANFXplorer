@@ -62,6 +62,8 @@ ITEMS = [
     "show_config.py",
     "32bitscreens",
     "firewall_manager.py",
+    "install.py",
+
     
 ]
 
@@ -342,7 +344,7 @@ def build_app_exe():
 
 
 def build_install_exe():
-    entry_script = os.path.join(ROOT, "install_launcher.py")
+    entry_script = os.path.join(ROOT, "install.py")
 
     base_dir = os.path.join(PYTHON_BUILD_DIR, "install")
     dist_dir = os.path.join(base_dir, "dist")
@@ -354,12 +356,11 @@ def build_install_exe():
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--onefile",
-        "--console",          # ⭐ ensures CMD window
+        "--noconsole",          # ⭐ ensures CMD window
         "--name", "install",
         "--distpath", dist_dir,
         "--workpath", work_dir,
         "--specpath", spec_dir,
-        "--noconfirm",
         entry_script
     ]
 
