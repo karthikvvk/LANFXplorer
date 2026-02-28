@@ -223,7 +223,7 @@ powershell -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('%S
 REM ===============================
 REM Mark install complete
 REM ===============================
-type nul > "%APP_DIR%\.installed"
+@REM type nul > "%APP_DIR%\.installed"
 
 echo.
 echo ================================================
@@ -234,6 +234,14 @@ echo    OpenSSL 3.5.5 LTS: C:\Program Files\OpenSSL-Win64
 echo    Desktop shortcut created
 echo ================================================
 echo.
+
+
+echo [+] Launching LANFXplorer...
+
+start "" "%APP_DIR%\app.exe"
+
+exit /b 0
+
 
 pause
 exit /b 0

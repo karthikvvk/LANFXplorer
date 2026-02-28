@@ -207,7 +207,9 @@ def run_ui():
     # ── 64-bit systems: try Flutter UI ──
     # Platform-specific UI paths, with debug (development) fallback
     if platform.system().lower() == "windows":
-        ui_path = APP_DIR / "build" / "windows" / "x64" / "runner" / "Release" / "lanfxplorer.exe"
+        ui_path1 = APP_DIR / "build" / "windows" / "runner" / "Release" / "lanfxplorer.exe"
+        ui_path2 = APP_DIR / "build" / "windows" / "x64" / "runner" / "Release" / "lanfxplorer.exe"
+        ui_path = ui_path1 if ui_path1.exists() else ui_path2
     else:
         # Linux: try debug build first (development), then release (custom build)
         debug_path = APP_DIR / "build" / "linux" / "x64" / "debug" / "bundle" / "lanfxplorer"

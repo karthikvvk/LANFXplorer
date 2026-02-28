@@ -67,7 +67,7 @@ ITEMS = [
 
 # Set Flutter bundle source and executable name based on OS
 if SYSTEM.startswith("win"):
-    FLUTTER_BUNDLE_SRC = "\\build\\windows\\runner\\Release"
+    FLUTTER_BUNDLE_SRC = "\\build\\windows\\x64\\runner\\Release"
     EXECUTABLE_NAME = "lanfxplorer.exe"
     PYTHON_UI_EXE_NAME = "python_ui.exe"
 else:
@@ -90,9 +90,10 @@ def build_python_ui():
         print("[!] Python UI entry point not found, skipping PyInstaller build")
         return None
 
-    dist_dir = os.path.join(PYTHON_BUILD_DIR, "dist")
-    work_dir = os.path.join(PYTHON_BUILD_DIR, "work")
-    spec_dir = PYTHON_BUILD_DIR
+    base_dir = os.path.join(PYTHON_BUILD_DIR, "python_ui")
+    dist_dir = os.path.join(base_dir, "dist")
+    work_dir = os.path.join(base_dir, "work")
+    spec_dir = base_dir
 
     # Collect all .py modules from 32bitscreens as hidden imports
     screens_dir = os.path.join(ROOT, "32bitscreens")
@@ -305,6 +306,71 @@ def comment_out_logs(file_path):
     return False
 
 
+
+def build_app_exe():
+    entry_script = os.path.join(ROOT, "app_launcher.py")
+
+    base_dir = os.path.join(PYTHON_BUILD_DIR, "app")
+    dist_dir = os.path.join(base_dir, "dist")
+    work_dir = os.path.join(base_dir, "work")
+    spec_dir = base_dir
+
+    os.makedirs(base_dir, exist_ok=True)
+
+    cmd = [
+        sys.executable, "-m", "PyInstaller",
+        "--onefile",
+        "--console",          # shows CMD window
+        "--name", "app",
+        "--distpath", dist_dir,
+        "--workpath", work_dir,
+        "--specpath", spec_dir,
+        "--noconfirm",
+        entry_script
+    ]
+
+    print("[*] Building app.exe...")
+    result = subprocess.run(cmd, cwd=ROOT)
+
+    exe_path = os.path.join(dist_dir, "app.exe")
+    print(exe_path)
+
+    return exe_path if os.path.exists(exe_path) else None
+
+
+
+
+
+def build_install_exe():
+    entry_script = os.path.join(ROOT, "install_launcher.py")
+
+    base_dir = os.path.join(PYTHON_BUILD_DIR, "install")
+    dist_dir = os.path.join(base_dir, "dist")
+    work_dir = os.path.join(base_dir, "work")
+    spec_dir = base_dir
+
+    os.makedirs(base_dir, exist_ok=True)
+
+    cmd = [
+        sys.executable, "-m", "PyInstaller",
+        "--onefile",
+        "--console",          # ⭐ ensures CMD window
+        "--name", "install",
+        "--distpath", dist_dir,
+        "--workpath", work_dir,
+        "--specpath", spec_dir,
+        "--noconfirm",
+        entry_script
+    ]
+
+    print("[*] Building install.exe...")
+    result = subprocess.run(cmd, cwd=ROOT)
+
+    exe_path = os.path.join(dist_dir, "install.exe")
+    return exe_path if os.path.exists(exe_path) else None
+
+
+
 # DISABLED: Process directory function
 def process_directory(directory):
     """
@@ -338,6 +404,26 @@ def main():
     if os.path.exists(APPBUILD):
         shutil.rmtree(APPBUILD)
     os.makedirs(APPBUILD)
+
+    if os.path.exists(PYTHON_BUILD_DIR):
+        shutil.rmtree(PYTHON_BUILD_DIR)
+
+    os.makedirs(PYTHON_BUILD_DIR, exist_ok=True)
+
+
+    # --- Build app.exe ---
+    app_exe = build_app_exe()
+    if app_exe:
+        shutil.copy2(app_exe, os.path.join(APPBUILD, "app.exe"))
+        print("[*] Included app.exe in archive")
+
+    # --- Build install.exe ---
+    install_exe = build_install_exe()
+    if install_exe:
+        shutil.copy2(install_exe, os.path.join(APPBUILD, "install.exe"))
+        print("[*] Included install.exe in archive")
+
+    # exit()
 
     # Copy listed items
     for item in ITEMS:
