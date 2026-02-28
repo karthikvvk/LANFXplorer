@@ -127,17 +127,38 @@ class CAManager:
         self.ca_info = None
         self.discovery_transport = None
 
+
+
     async def start_discovery(self):
+        import platform
+        import socket as _socket
+
         loop = asyncio.get_running_loop()
-        # Bind to 0.0.0.0 to listen, but we need to know how to respond
-        # Use reuse_port=True to allow restart without 'address already in use' error
-        self.discovery_transport, _ = await loop.create_datagram_endpoint(
-            lambda: CADiscoveryProtocol(self.is_ca, self),
-            local_addr=('0.0.0.0', DISCOVERY_PORT),
-            allow_broadcast=True,
-            reuse_port=True  # Allow port reuse on restart
-        )
+
+        if platform.system().lower() == "windows":
+            # reuse_port is Linux-only — use SO_REUSEADDR via a manual socket instead
+            sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+            sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+            sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_BROADCAST, 1)
+            sock.bind(('0.0.0.0', DISCOVERY_PORT))
+            self.discovery_transport, _ = await loop.create_datagram_endpoint(
+                lambda: CADiscoveryProtocol(self.is_ca, self),
+                sock=sock,
+            )
+        else:
+            self.discovery_transport, _ = await loop.create_datagram_endpoint(
+                lambda: CADiscoveryProtocol(self.is_ca, self),
+                local_addr=('0.0.0.0', DISCOVERY_PORT),
+                allow_broadcast=True,
+                reuse_port=True,
+            )
+
         logger.info(f"Discovery started on port {DISCOVERY_PORT}")
+
+
+
+
+
 
     def stop_discovery(self):
         if self.discovery_transport:
@@ -148,14 +169,15 @@ class CAManager:
             self.ca_info = (host, port)
             self.ca_found_event.set()
 
+
+
     async def become_ca(self):
+        import platform
         logger.info("No CA found. Becoming CA...")
         self.is_ca = True
         
-        # Stop generic discovery to switch to CA mode (responding instead of asking)
         self.stop_discovery()
         
-        # Generate CA Cert/Key
         from cryptography.hazmat.primitives.asymmetric import rsa
         key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         
@@ -190,24 +212,25 @@ class CAManager:
             encryption_algorithm=serialization.NoEncryption()
         )
         
-        # Save to disk
         with open(os.path.join(self.cert_dir, "ca_cert.pem"), "wb") as f:
             f.write(ca_cert_pem)
         with open(os.path.join(self.cert_dir, "ca_key.pem"), "wb") as f:
             f.write(ca_key_pem)
 
-        # Start Signing Server with reuse_address to allow restart
         server = CASigningServer(ca_cert_pem, ca_key_pem)
+        _start_server_kwargs = {"reuse_address": True}
+        if platform.system().lower() != "windows":
+            _start_server_kwargs["reuse_port"] = True
         await asyncio.start_server(
             server.handle_client, '0.0.0.0', SIGNING_PORT,
-            reuse_address=True, reuse_port=True  # Allow port reuse on restart
+            **_start_server_kwargs
         )
         logger.info(f"CA Signing Server started on {SIGNING_PORT}")
         
-        # Restart discovery as CA
         await self.start_discovery()
         
         return ca_cert_pem, ca_key_pem
+
 
     def check_ca_status(self) -> bool:
         """Check if CA keys exist on disk and update is_ca state."""
@@ -218,12 +241,16 @@ class CAManager:
             return True
         return False
 
+
+
+
     async def start_ca_service(self):
+        import platform
         """Start the CA Signing Server and Discovery Responder if this node is the CA."""
         if not self.is_ca:
             if not self.check_ca_status():
                 logger.warning("Cannot start CA service: CA keys not found.")
-                return 
+                return
 
         try:
             ca_cert_path = os.path.join(self.cert_dir, "ca_cert.pem")
@@ -232,21 +259,23 @@ class CAManager:
             with open(ca_cert_path, "rb") as f: ca_cert_pem = f.read()
             with open(ca_key_path, "rb") as f: ca_key_pem = f.read()
             
-            # Start TCP Signing Server with reuse_address to allow restart
             server = CASigningServer(ca_cert_pem, ca_key_pem)
-            # We don't store the server object, letting it run in background loop.
-            # Ideally we should keep track of it to close it, but for this service it's fine.
+            _start_server_kwargs = {"reuse_address": True}
+            if platform.system().lower() != "windows":
+                _start_server_kwargs["reuse_port"] = True
             self.signing_server = await asyncio.start_server(
                 server.handle_client, '0.0.0.0', SIGNING_PORT,
-                reuse_address=True, reuse_port=True  # Allow port reuse on restart
+                **_start_server_kwargs
             )
             logger.info(f"CA Signing Server started on {SIGNING_PORT}")
             
-            # Start UDP Discovery (as responder since self.is_ca is True)
             await self.start_discovery()
             
         except Exception as e:
             logger.error(f"Failed to start CA service: {e}")
+
+
+
 
     async def get_signed_cert(self, private_key_pem: bytes, common_name: str) -> Tuple[bytes, bytes]:
         """Returns (client_cert_pem, ca_cert_pem)"""

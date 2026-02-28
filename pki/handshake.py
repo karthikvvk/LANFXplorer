@@ -188,19 +188,23 @@ class HandshakeService:
                 await writer.wait_closed()
             except Exception:
                 pass
-    
+
     async def start(self):
         """Start the handshake service."""
-        # Use reuse_address/reuse_port to allow restart without 'address already in use' error
+        import platform
+        _kwargs = {"reuse_address": True}
+        if platform.system().lower() != "windows":
+            _kwargs["reuse_port"] = True
         self.server = await asyncio.start_server(
             self.handle_client,
             self.host,
             HANDSHAKE_PORT,
-            reuse_address=True,
-            reuse_port=True
+            **_kwargs
         )
         logger.info(f"[Handshake] Service started on {self.host}:{HANDSHAKE_PORT}")
-    
+
+
+
     async def stop(self):
         """Stop the handshake service."""
         if self.server:

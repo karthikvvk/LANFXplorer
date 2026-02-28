@@ -439,17 +439,32 @@ class PeerDiscoveryListener:
                 response = f"{PeerDiscoveryListener.PEER_RESPONSE_PREFIX.decode()} {self.host_ip}".encode()
                 self.transport.sendto(response, addr)
 
+
     async def start(self):
+        import platform
+        import socket as _socket
         loop = asyncio.get_running_loop()
 
-        # Use reuse_port=True to allow restart without 'address already in use' error
-        self.transport, self.protocol = await loop.create_datagram_endpoint(
-            lambda: self.Protocol(self.host_ip),
-            local_addr=('0.0.0.0', self.DISCOVERY_PORT),
-            allow_broadcast=True,
-            reuse_port=True  # Allow port reuse on restart
-        )
+        if platform.system().lower() == "windows":
+            sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+            sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+            sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_BROADCAST, 1)
+            sock.bind(('0.0.0.0', self.DISCOVERY_PORT))
+            self.transport, self.protocol = await loop.create_datagram_endpoint(
+                lambda: self.Protocol(self.host_ip),
+                sock=sock,
+            )
+        else:
+            self.transport, self.protocol = await loop.create_datagram_endpoint(
+                lambda: self.Protocol(self.host_ip),
+                local_addr=('0.0.0.0', self.DISCOVERY_PORT),
+                allow_broadcast=True,
+                reuse_port=True,
+            )
         print(f"[+] Peer Discovery Listener started on port {self.DISCOVERY_PORT}")
+
+
+
 
     def stop(self):
         if self.transport:
