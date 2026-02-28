@@ -38,13 +38,38 @@ REM -------------------------------------------------
 set "APP_DIR=%~dp0"
 set "APP_DIR=%APP_DIR:~0,-1%"
 
-set "PY_PREFIX=%APP_DIR%\opt\python39"
-set "PYTHON_EXE=%PY_PREFIX%\python.exe"
+REM -------------------------------------------------
+REM Resolve system Python from install-time markers
+REM -------------------------------------------------
+set "PY_BIN_DIR="
+set "PY_SCRIPTS_DIR="
 
-REM Verify Python exists
-if not exist "%PYTHON_EXE%" (
-    echo [ERROR] Python not found at: %PYTHON_EXE%
-    echo         Please run install.bat first.
+if exist "%APP_DIR%\.python_bin_dir" (
+    set /p PY_BIN_DIR=<"%APP_DIR%\.python_bin_dir"
+    REM trim any trailing spaces/newlines
+    set "PY_BIN_DIR=!PY_BIN_DIR: =!"
+)
+if exist "%APP_DIR%\.python_scripts_dir" (
+    set /p PY_SCRIPTS_DIR=<"%APP_DIR%\.python_scripts_dir"
+    set "PY_SCRIPTS_DIR=!PY_SCRIPTS_DIR: =!"
+)
+
+REM If marker files exist and are valid, prepend those dirs to PATH
+if defined PY_BIN_DIR (
+    if exist "!PY_BIN_DIR!\python.exe" (
+        set "PATH=!PY_BIN_DIR!;!PY_SCRIPTS_DIR!;%PATH%"
+    )
+)
+
+REM Resolve the actual python.exe to use
+set "PYTHON_EXE="
+for /f "delims=" %%i in ('where python 2^>nul') do (
+    if not defined PYTHON_EXE set "PYTHON_EXE=%%i"
+)
+
+if not defined PYTHON_EXE (
+    echo [ERROR] Python not found.
+    echo         Please run install.bat first, or ensure Python is on your PATH.
     pause
     exit /b 1
 )
@@ -53,7 +78,6 @@ REM -------------------------------------------------
 REM Set up Python environment
 REM -------------------------------------------------
 set "PYTHONPATH=%APP_DIR%"
-set "PATH=%PY_PREFIX%;%PY_PREFIX%\Scripts;%PATH%"
 
 REM Make system OpenSSL CLI available via env var (not on PATH — avoids DLL conflicts)
 set "OPENSSL_PATH=C:\Program Files\OpenSSL-Win64\bin\openssl.exe"
@@ -65,8 +89,6 @@ set "ARCH_BITS=64"
 if "%PROCESSOR_ARCHITECTURE%"=="x86" (
     if not defined PROCESSOR_ARCHITEW6432 (
         set "ARCH_BITS=32"
-        REM 32-bit: Flutter UI won't work (x64 only) but main.py will
-        REM try Python UI (tkinter) first, then fall back to headless CLI
         set "OPENSSL_PATH=C:\Program Files (x86)\OpenSSL-Win32\bin\openssl.exe"
     )
 )
