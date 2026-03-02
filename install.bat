@@ -138,10 +138,11 @@ if not exist "%SYSTEM_SSL_PATH%" (
     echo [+] Please accept the license and keep the default install path.
     echo.
 
-    set "DOWNLOAD_PATH=%USERPROFILE%\Downloads\openssl_installer.exe"
+    set "DOWNLOAD_PATH=%APP_DIR%\openssl_installer.exe"
+
 
     powershell -Command "Invoke-WebRequest -Uri 'https://slproweb.com/download/Win64OpenSSL_Light-3_5_5.exe' -OutFile '%DOWNLOAD_PATH%'" && (
-        echo [+] OpenSSL installer downloaded to Downloads folder
+        echo [+] OpenSSL installer downloaded to app directory
     ) || (
         echo [ERROR] Failed to download OpenSSL installer
         exit /b 1
