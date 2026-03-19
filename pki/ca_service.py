@@ -233,13 +233,86 @@ class CAManager:
 
 
     def check_ca_status(self) -> bool:
-        """Check if CA keys exist on disk and update is_ca state."""
+        """Check if CA keys exist on disk and update is_ca state.
+
+        NOTE: This only checks local disk state. Use `probe_ca_on_network()`
+        to also verify no other CA is already active on the network before
+        assuming the CA role.
+        """
         ca_cert_path = os.path.join(self.cert_dir, "ca_cert.pem")
         ca_key_path = os.path.join(self.cert_dir, "ca_key.pem")
         if os.path.exists(ca_cert_path) and os.path.exists(ca_key_path):
             self.is_ca = True
             return True
         return False
+
+    def probe_ca_on_network(self, timeout: float = 3.0):
+        """
+        Send a WHO_IS_CA broadcast and wait for any peer CA to respond.
+
+        This cross-checks the scanner's broadcast result: if a peer has already
+        responded as CA, we defer to it instead of self-appointing based on
+        stale local keys.
+
+        Returns:
+            (host, port) tuple if a CA was found on the network, or None.
+        """
+        import socket as _socket
+
+        config = AppConfig()
+        broadcast_addr = config.broadcast or "<broadcast>"
+        discovery_port = DISCOVERY_PORT
+        discovery_msg  = DISCOVERY_MSG
+        response_prefix = CA_RESPONSE_PREFIX
+
+        import time as _time
+
+        found_ca = None
+        sock = None
+        try:
+            sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+            sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_BROADCAST, 1)
+            sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+            sock.settimeout(timeout)
+
+            logger.info(f"[CA probe] Broadcasting WHO_IS_CA to {broadcast_addr}:{discovery_port}")
+            sock.sendto(discovery_msg, (broadcast_addr, discovery_port))
+
+            deadline = _time.time() + timeout
+            while _time.time() < deadline:
+                try:
+                    data, addr = sock.recvfrom(4096)
+                    if data.startswith(response_prefix):
+                        parts = data.decode().split()
+                        if len(parts) >= 3:
+                            ca_host = parts[1]
+                            ca_port = int(parts[2])
+                        else:
+                            ca_host = addr[0]
+                            ca_port = SIGNING_PORT
+                        logger.info(f"[CA probe] Found existing CA at {ca_host}:{ca_port}")
+                        found_ca = (ca_host, ca_port)
+                        break
+                except _socket.timeout:
+                    break
+                except Exception as e:
+                    logger.debug(f"[CA probe] recv error: {e}")
+                    break
+
+        except Exception as e:
+            logger.warning(f"[CA probe] Broadcast failed: {e}")
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+
+        if found_ca is None:
+            logger.info("[CA probe] No CA responded — network is clear.")
+        return found_ca
+
+
 
 
 

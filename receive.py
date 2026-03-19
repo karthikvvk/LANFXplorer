@@ -75,9 +75,52 @@ async def main() -> None:
     ca_mgr = CAManager(ca_ip, os.getcwd())
     
     if ca_mgr.check_ca_status():
-        print(f"[receiver] CA keys found in {os.getcwd()}. Starting CA Service (Signing + Discovery)...")
-        print(f"[receiver] CA will be advertised at {ca_ip}")
-        await ca_mgr.start_ca_service()
+        # We have CA keys locally — but first, check if another CA already exists on the network.
+        # This prevents a dual-CA split if a previous CA session left keys behind.
+        print("[receiver] CA keys found locally. Probing network for existing CA...")
+        existing_ca = ca_mgr.probe_ca_on_network(timeout=3.0)
+
+        if existing_ca:
+            # Another CA is live on the network — defer to it
+            ca_host, ca_port = existing_ca
+            print(f"[receiver] Existing CA found at {ca_host}:{ca_port}. Deferring — will request certificate from it.")
+
+            # Generate private key if not present
+            if not os.path.isfile(key_path):
+                print("[receiver] Generating private key...")
+                from cryptography.hazmat.primitives.asymmetric import rsa
+                from cryptography.hazmat.primitives import serialization
+                priv_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+                with open(key_path, "wb") as f:
+                    f.write(priv_key.private_bytes(
+                        encoding=serialization.Encoding.PEM,
+                        format=serialization.PrivateFormat.TraditionalOpenSSL,
+                        encryption_algorithm=serialization.NoEncryption()
+                    ))
+
+            with open(key_path, "rb") as f:
+                priv_key_pem = f.read()
+
+            # Use the discovered CA directly (skip full discovery loop)
+            await ca_mgr.on_ca_found(ca_host, ca_port)
+            print("[receiver] Requesting certificate from existing CA...")
+            client_cert, ca_cert_pem = await ca_mgr.get_signed_cert(priv_key_pem, f"{user}@{ca_ip}")
+            with open(cert_path, "wb") as f:
+                f.write(client_cert)
+            with open(ca_cert or "ca_cert.pem", "wb") as f:
+                f.write(ca_cert_pem)
+            if not ca_cert:
+                ca_cert = os.path.join(os.getcwd(), "ca_cert.pem")
+            print("[receiver] ✓ Certificate received from existing CA. Acting as standard peer.")
+            ca_mgr.is_ca = False  # We deferred — we are NOT the CA
+
+        else:
+            # No CA found on network — proceed as CA
+            print(f"[receiver] No other CA on network. Starting CA Service (Signing + Discovery)...")
+            print(f"[receiver] CA will be advertised at {ca_ip}")
+            await ca_mgr.start_ca_service()
+
+
     else:
         print("[receiver] No CA keys found locally. Running as standard peer.")
         print("[receiver] Attempting CA discovery on network...")
