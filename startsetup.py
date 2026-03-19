@@ -257,7 +257,35 @@ def write_env(installer=False):
                 "-days", "365", "-subj", "/CN=quic-server.local"
             ])
         else:
-            os.system("""openssl req -x509 -nodes -newkey rsa:2048 -keyout key.pem -out cert.pem  -days 365 -subj "/CN=quic-server.local\"""")
+            # Generate self-signed cert using Python cryptography (avoids system openssl
+            # version mismatch caused by LD_LIBRARY_PATH pointing to bundled openssl libs)
+            from cryptography import x509
+            from cryptography.x509.oid import NameOID
+            from cryptography.hazmat.primitives import hashes, serialization
+            from cryptography.hazmat.primitives.asymmetric import rsa
+            import datetime
+
+            priv_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, u"quic-server.local")])
+            cert = (
+                x509.CertificateBuilder()
+                .subject_name(subject)
+                .issuer_name(subject)
+                .public_key(priv_key.public_key())
+                .serial_number(x509.random_serial_number())
+                .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
+                .not_valid_after(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=365))
+                .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+                .sign(priv_key, hashes.SHA256())
+            )
+            with open("key.pem", "wb") as f:
+                f.write(priv_key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.TraditionalOpenSSL,
+                    encryption_algorithm=serialization.NoEncryption()
+                ))
+            with open("cert.pem", "wb") as f:
+                f.write(cert.public_bytes(serialization.Encoding.PEM))
     try:
         get_network_info()
     except Exception:

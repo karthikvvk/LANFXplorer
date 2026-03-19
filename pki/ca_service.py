@@ -36,8 +36,7 @@ class CADiscoveryProtocol(asyncio.DatagramProtocol):
     def connection_made(self, transport):
         self.transport = transport
         if not self.is_ca:
-            # Start periodic broadcasts of WHO_IS_CA (every 1 second)
-            logger.info("Starting periodic CA discovery broadcasts...")
+            # Enable broadcast on the socket and start periodic WHO_IS_CA
             sock = self.transport.get_extra_info('socket')
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             self._send_broadcast()
@@ -46,17 +45,18 @@ class CADiscoveryProtocol(asyncio.DatagramProtocol):
         """Send WHO_IS_CA and reschedule until CA is found or transport closes."""
         if self.transport and not self.transport.is_closing():
             try:
-                # Use specific subnet broadcast if available, otherwise fallback
                 config = AppConfig()
                 target_broadcast = config.broadcast or '<broadcast>'
                 self.transport.sendto(DISCOVERY_MSG, (target_broadcast, DISCOVERY_PORT))
-                logger.debug(f"Sent WHO_IS_CA broadcast to {target_broadcast}")
+                print(f"[CA discovery] WHO_IS_CA → {target_broadcast}:{DISCOVERY_PORT}")
             except Exception as e:
-                logger.debug(f"Broadcast failed: {e}")
-                pass
-            # Reschedule every 1 second
-            loop = asyncio.get_event_loop()
-            self._broadcast_handle = loop.call_later(1.0, self._send_broadcast)
+                print(f"[CA discovery] Broadcast failed: {e}")
+            # Reschedule every 2 seconds (use running loop, not deprecated get_event_loop)
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.get_event_loop()
+            self._broadcast_handle = loop.call_later(2.0, self._send_broadcast)
 
     def connection_lost(self, exc):
         """Cancel periodic broadcasts when transport closes."""
@@ -66,16 +66,17 @@ class CADiscoveryProtocol(asyncio.DatagramProtocol):
 
     def datagram_received(self, data: bytes, addr: Tuple[str, int]):
         if self.is_ca and data == DISCOVERY_MSG:
-            # I am CA, respond
+            # I am CA — respond to the requesting peer
             response = f"{CA_RESPONSE_PREFIX.decode()} {self.ca_manager.host} {SIGNING_PORT}".encode()
             self.transport.sendto(response, addr)
+            print(f"[CA discovery] Replied I_AM_CA to {addr[0]}")
         elif not self.is_ca and data.startswith(CA_RESPONSE_PREFIX):
             # Found a CA!
             parts = data.decode().split()
             if len(parts) >= 3:
                 ca_host = parts[1]
                 ca_port = int(parts[2])
-                logger.info(f"Discovered CA at {ca_host}:{ca_port}")
+                print(f"[CA discovery] Received I_AM_CA from {ca_host}:{ca_port}")
                 # Stop periodic broadcasting — CA found
                 if self._broadcast_handle:
                     self._broadcast_handle.cancel()
@@ -246,70 +247,83 @@ class CAManager:
             return True
         return False
 
-    def probe_ca_on_network(self, timeout: float = 3.0):
+    async def probe_ca_on_network(self, timeout: float = 3.0):
         """
-        Send a WHO_IS_CA broadcast and wait for any peer CA to respond.
+        Async probe: send one WHO_IS_CA broadcast and wait up to `timeout`
+        seconds for any live CA to reply.
 
-        This cross-checks the scanner's broadcast result: if a peer has already
-        responded as CA, we defer to it instead of self-appointing based on
-        stale local keys.
-
-        Returns:
-            (host, port) tuple if a CA was found on the network, or None.
+        Runs inside the asyncio event loop (no blocking I/O) so it never
+        stalls other coroutines.  Returns (host, port) or None.
         """
+        import platform as _platform
         import socket as _socket
 
         config = AppConfig()
         broadcast_addr = config.broadcast or "<broadcast>"
-        discovery_port = DISCOVERY_PORT
-        discovery_msg  = DISCOVERY_MSG
-        response_prefix = CA_RESPONSE_PREFIX
 
-        import time as _time
+        found_ca   = None
+        future     = asyncio.get_running_loop().create_future()
+        transport  = None
 
-        found_ca = None
-        sock = None
-        try:
-            sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
-            sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_BROADCAST, 1)
-            sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
-            sock.settimeout(timeout)
-
-            logger.info(f"[CA probe] Broadcasting WHO_IS_CA to {broadcast_addr}:{discovery_port}")
-            sock.sendto(discovery_msg, (broadcast_addr, discovery_port))
-
-            deadline = _time.time() + timeout
-            while _time.time() < deadline:
+        class _ProbeProtocol(asyncio.DatagramProtocol):
+            def connection_made(self, t):
+                nonlocal transport
+                transport = t
+                sock = t.get_extra_info('socket')
+                sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_BROADCAST, 1)
                 try:
-                    data, addr = sock.recvfrom(4096)
-                    if data.startswith(response_prefix):
-                        parts = data.decode().split()
-                        if len(parts) >= 3:
-                            ca_host = parts[1]
-                            ca_port = int(parts[2])
-                        else:
-                            ca_host = addr[0]
-                            ca_port = SIGNING_PORT
-                        logger.info(f"[CA probe] Found existing CA at {ca_host}:{ca_port}")
-                        found_ca = (ca_host, ca_port)
-                        break
-                except _socket.timeout:
-                    break
+                    t.sendto(DISCOVERY_MSG, (broadcast_addr, DISCOVERY_PORT))
+                    print(f"[CA probe] WHO_IS_CA → {broadcast_addr}:{DISCOVERY_PORT}")
                 except Exception as e:
-                    logger.debug(f"[CA probe] recv error: {e}")
-                    break
+                    print(f"[CA probe] Broadcast send failed: {e}")
+                    if not future.done():
+                        future.set_result(None)
 
+            def datagram_received(self, data, addr):
+                if data.startswith(CA_RESPONSE_PREFIX) and not future.done():
+                    parts = data.decode().split()
+                    ca_host = parts[1] if len(parts) >= 3 else addr[0]
+                    ca_port = int(parts[2]) if len(parts) >= 3 else SIGNING_PORT
+                    print(f"[CA probe] Found existing CA at {ca_host}:{ca_port}")
+                    future.set_result((ca_host, ca_port))
+
+            def error_received(self, exc):
+                print(f"[CA probe] Socket error: {exc}")
+                if not future.done():
+                    future.set_result(None)
+
+            def connection_lost(self, exc):
+                if not future.done():
+                    future.set_result(None)
+
+        loop = asyncio.get_running_loop()
+        try:
+            if _platform.system().lower() == "windows":
+                sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+                sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+                sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_BROADCAST, 1)
+                sock.bind(('0.0.0.0', 0))   # ephemeral port
+                _transport, _ = await loop.create_datagram_endpoint(
+                    _ProbeProtocol, sock=sock)
+            else:
+                _transport, _ = await loop.create_datagram_endpoint(
+                    _ProbeProtocol,
+                    local_addr=('0.0.0.0', 0),    # ephemeral port
+                    allow_broadcast=True)
+
+            try:
+                found_ca = await asyncio.wait_for(
+                    asyncio.shield(future), timeout=timeout)
+            except asyncio.TimeoutError:
+                pass
         except Exception as e:
-            logger.warning(f"[CA probe] Broadcast failed: {e}")
+            print(f"[CA probe] Could not open UDP socket: {e}")
         finally:
-            if sock:
-                try:
-                    sock.close()
-                except Exception:
-                    pass
+            if transport and not transport.is_closing():
+                transport.close()
 
         if found_ca is None:
-            logger.info("[CA probe] No CA responded — network is clear.")
+            print("[CA probe] No CA responded on the network.")
         return found_ca
 
 

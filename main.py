@@ -223,8 +223,11 @@ def main():
                 print_status("run", f"Starting Flutter UI ({flutter_bin.name})")
                 try:
                     # Run without overriding cwd so it finds .env in the project root
-                    subprocess.run([str(flutter_bin)])
                     ui_launched = True
+                    subprocess.run([str(flutter_bin)])
+                    # ui_launched = True
+                except KeyboardInterrupt:
+                    pass  # Ctrl+C from user — clean exit
                 except Exception as e:
                     print_status("warn", f"Flutter UI failed: {e}. Falling back to Tkinter...")
 
@@ -235,6 +238,8 @@ def main():
                 import tkinter_app
                 tkinter_app.main()          # blocks until window is closed
                 ui_launched = True
+            except KeyboardInterrupt:
+                pass  # Ctrl+C from user — clean exit
             except Exception as e:
                 print_status("warn", f"Tkinter UI failed to start: {e}")
 

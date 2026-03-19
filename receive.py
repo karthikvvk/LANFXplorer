@@ -78,7 +78,7 @@ async def main() -> None:
         # We have CA keys locally — but first, check if another CA already exists on the network.
         # This prevents a dual-CA split if a previous CA session left keys behind.
         print("[receiver] CA keys found locally. Probing network for existing CA...")
-        existing_ca = ca_mgr.probe_ca_on_network(timeout=3.0)
+        existing_ca = await ca_mgr.probe_ca_on_network(timeout=3.0)
 
         if existing_ca:
             # Another CA is live on the network — defer to it
