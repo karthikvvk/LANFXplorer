@@ -203,11 +203,53 @@ def main():
 
     print_status("ok", "System running")
 
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print_status("info", "Shutdown")
+    # ── UI ──
+    import struct
+    arch_bits = struct.calcsize("P") * 8
+    headless = os.environ.get("LANFXPLORER_HEADLESS") == "1"
+    display   = os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+    system = platform.system().lower()
+
+    ui_launched = False
+
+    if not headless and (display or system == "windows"):
+        if arch_bits == 64:
+            if system == "windows":
+                flutter_bin = APP_DIR / "build" / "windows" / "x64" / "runner" / "Release" / "lanfxplorer.exe"
+            else:
+                flutter_bin = APP_DIR / "build" / "linux" / "x64" / "release" / "bundle" / "lanfxplorer"
+
+            if flutter_bin.exists():
+                print_status("run", f"Starting Flutter UI ({flutter_bin.name})")
+                try:
+                    # Run without overriding cwd so it finds .env in the project root
+                    subprocess.run([str(flutter_bin)])
+                    ui_launched = True
+                except Exception as e:
+                    print_status("warn", f"Flutter UI failed: {e}. Falling back to Tkinter...")
+
+        if not ui_launched:
+            try:
+                print_status("run", "Starting Tkinter UI")
+                sys.path.insert(0, str(APP_DIR / "32bitscreens"))
+                import tkinter_app
+                tkinter_app.main()          # blocks until window is closed
+                ui_launched = True
+            except Exception as e:
+                print_status("warn", f"Tkinter UI failed to start: {e}")
+
+    if not ui_launched:
+        if headless:
+            print_status("info", "Headless mode — UI suppressed")
+        else:
+            print_status("warn", "No UI could be started — running headless")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
+
+    print_status("info", "Shutdown")
 
 
 if __name__ == "__main__":

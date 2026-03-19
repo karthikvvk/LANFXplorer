@@ -10,12 +10,10 @@ from pathlib import Path
 APP_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(APP_DIR))
 
-# Now import third-party modules
-from dotenv import set_key, load_dotenv
-
 # Now import local modules
 from path_security import get_lanfxplorer_root, ensure_lanfxplorer_directory
 from config_manager import get_config_manager
+from app_config import get_config
 
 pwd = os.getcwd()
 user = getpass.getuser()
@@ -194,52 +192,35 @@ def get_network_info():
 def load_env_vars():
 
     global host_ip, cidr, interface, system_type, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
-    
-    # override=True ensures .env values override any existing environment variables
-    load_dotenv(override=True)
-    
+
+    # Reload .env → os.environ via AppConfig (no dotenv needed)
+    cfg = get_config()
+    cfg.reload()
+
     # Load password from secure keyring storage
     config_mgr = get_config_manager()
     config_mgr.migrate_password_from_env()  # One-time migration
     password = config_mgr.get_password()
-    
 
-    pwd = os.getenv("PWD", os.getcwd())
-    user = os.getenv("USER", getpass.getuser())
-    system_type = os.getenv("SYSTEM", platform.system().lower())
-    interface = os.getenv("INTERFACE", interface)
-    host_ip = os.getenv("HOST", "")
-    subnet = os.getenv("SUBNET", "")
-    gateway = os.getenv("GATEWAY", "")
-    broadcast_address = os.getenv("BROADCAST", "")
-    cidr = os.getenv("CIDR", "")
-    port = int(os.getenv("PORT", "4433"))
-    out_dir = os.getenv("OUTDIR", "")
-    src_dir = os.getenv("SRCDIR", "")
-    certi = os.getenv("CERTI", "")
-    key = os.getenv("KEY", "")
-    dest_host = os.getenv("DEST_HOST", "")
-    reciv_host = os.getenv("RECIVHOST", "0.0.0.0")
-    ca_cert = os.getenv("CA_CERT")#, os.path.join(pwd, "ca_cert.pem"))
-    
+    pwd = cfg.pwd or os.getcwd()
+    user = cfg.user or getpass.getuser()
+    system_type = cfg.system_type or platform.system().lower()
+    interface = cfg.interface or interface
+    host_ip = cfg.host
+    subnet = cfg.subnet
+    gateway = cfg.gateway
+    broadcast_address = cfg.broadcast
+    cidr = cfg.cidr
+    port = cfg.port
+    out_dir = cfg.out_dir
+    src_dir = cfg.src_dir
+    certi = cfg.certi
+    key = cfg.key
+    dest_host = cfg.dest_host
+    reciv_host = cfg.reciv_host
+    ca_cert = cfg.ca_cert
+
     print(f"[+] Loaded environment variables from .env")
-    # print({
-    #     "host": host_ip,
-    #     "port": port,
-    #     "certi": certi,
-    #     "key": key,
-    #     "out_dir": out_dir,
-    #     "src": src_dir,
-    #     "interface": interface,
-    #     "system": sys,
-    #     "pwd": pwd,
-    #     "user": user,
-    #     "subnet": subnet,
-    #     "gateway": gateway,
-    #     "broadcast": broadcast_address,
-    #     "cidr": cidr,
-    #     "dest_host": dest_host
-    # })
     return {
         "host": host_ip,
         "port": port,
@@ -334,13 +315,14 @@ def write_env(installer=False):
         "INSTALLER": "true" if installer else "false",
     }
 
-    env_file = ".env"
-    load_dotenv(env_file)
-    if not os.path.exists(env_file):
-        open(env_file, "a").close()
-
-    for key, value in env_vars.items():
-        set_key(env_file, key, str(value))
+    # Write all env vars in one call (replaces the set_key loop)
+    env_file = str(APP_DIR / ".env")
+    get_config().write_env_bulk(
+        {k: str(v) for k, v in env_vars.items()},
+        env_path=env_file
+    )
+    # Reload singleton so subsequent get_config() calls see new values
+    get_config().reload()
 
     print(f"\n[+] Environment variables updated in {env_file}")
 
@@ -356,8 +338,9 @@ def setup_pki_and_write_env():
     
 
     global pwd, out_dir
-    load_dotenv()
-    pwd = os.getenv("PWD", os.getcwd())
+    cfg = get_config()
+    cfg.reload()
+    pwd = cfg.pwd or os.getcwd()
     
 
     key_file = os.path.join(pwd, "key.pem")

@@ -30,7 +30,8 @@ import threading
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from dotenv import load_dotenv
+# Resolved once at import time — safe to use before _app_dir is set on the instance
+_APP_DIR = Path(__file__).parent.resolve()
 
 
 class AppConfig:
@@ -91,9 +92,10 @@ class AppConfig:
         self._initialized = True
     
     def _load_from_env(self) -> None:
-        """Load all configuration from .env file."""
-        # Reload .env file (override=True ensures fresh values)
-        load_dotenv(override=True)
+        """Load all configuration from .env file (pure Python — no dotenv dep)."""
+        # Parse .env and push every key into os.environ (override=True semantics)
+        for key, value in self.read_env_file().items():
+            os.environ[key] = value
         
         with self._config_lock:
             # Determine app directory
@@ -131,7 +133,83 @@ class AppConfig:
             
             # Installer flag
             self.installer = os.getenv("INSTALLER", "false").lower() == "true"
-    
+
+    # ==================== .env FILE I/O (no dotenv dep) ====================
+
+    def read_env_file(self, env_path: Optional[str] = None) -> Dict[str, str]:
+        """
+        Parse a .env file into a plain dict WITHOUT loading it into os.environ.
+        Handles KEY=value and KEY='value' and KEY="value" formats.
+        Replaces dotenv_values() for callers that only need to read values.
+        """
+        path = env_path or str(_APP_DIR / ".env")
+        result: Dict[str, str] = {}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for raw in f:
+                    line = raw.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, _, val = line.partition("=")
+                    key = key.strip()
+                    val = val.strip().strip("'\"")
+                    if key:
+                        result[key] = val
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            print(f"[AppConfig] Warning: could not read .env: {exc}")
+        return result
+
+    def write_env(self, key: str, value: str, env_path: Optional[str] = None) -> bool:
+        """
+        Write / update a single key in the .env file (pure file I/O).
+        Replaces dotenv's set_key() across the codebase.
+        Also updates os.environ immediately.
+        """
+        return self.write_env_bulk({key: value}, env_path=env_path)
+
+    def write_env_bulk(self, kvdict: Dict[str, str], env_path: Optional[str] = None) -> bool:
+        """
+        Write / update multiple keys in the .env file atomically.
+        Existing keys are updated in-place; new keys are appended.
+        Replaces the set_key() loop in startsetup.write_env().
+        """
+        path = env_path or str(_APP_DIR / ".env")
+        try:
+            Path(path).touch(exist_ok=True)
+            # Read existing lines preserving comments / ordering
+            with open(path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+            updated_keys = set()
+            new_lines = []
+            for raw in lines:
+                line = raw.rstrip("\n")
+                if "=" in line and not line.strip().startswith("#"):
+                    k = line.partition("=")[0].strip()
+                    if k in kvdict:
+                        new_lines.append(f"{k}='{kvdict[k]}'\n")
+                        updated_keys.add(k)
+                        continue
+                new_lines.append(raw if raw.endswith("\n") else raw + "\n")
+
+            # Append keys that weren't already in the file
+            for k, v in kvdict.items():
+                if k not in updated_keys:
+                    new_lines.append(f"{k}='{v}'\n")
+
+            with open(path, "w", encoding="utf-8") as f:
+                f.writelines(new_lines)
+
+            # Propagate to current process environment
+            for k, v in kvdict.items():
+                os.environ[k] = str(v)
+            return True
+        except Exception as exc:
+            print(f"[AppConfig] Error writing .env: {exc}")
+            return False
+
     def reload(self) -> None:
         """
         Reload configuration from .env file.
@@ -143,11 +221,15 @@ class AppConfig:
     def get_all(self) -> Dict[str, Any]:
         """
         Return all configuration as a dictionary.
-        This maintains backward compatibility with load_env_vars() return format.
-        
-        Returns:
-            Dictionary with all configuration values.
+        Includes password fetched lazily from ConfigManager (if available).
         """
+        # Lazy import to avoid circular imports at module level
+        try:
+            from config_manager import get_password as _get_pw
+            password = _get_pw()
+        except Exception:
+            password = os.environ.get("PASSWORD")
+
         with self._config_lock:
             return {
                 "host": self.host,
@@ -167,6 +249,7 @@ class AppConfig:
                 "dest_host": self.dest_host,
                 "recivhost": self.reciv_host,
                 "ca_cert": self.ca_cert,
+                "password": password,
             }
     
     def get(self, key: str, default: Any = None) -> Any:

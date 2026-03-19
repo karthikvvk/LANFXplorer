@@ -156,56 +156,25 @@ class ConfigManager:
     def get_config_value(self, key: str, default: str = "") -> str:
         """
         Get a configuration value from .env file.
-        
-        Args:
-            key: The configuration key.
-            default: Default value if key not found.
-            
-        Returns:
-            The configuration value.
         """
         # First check environment (allows runtime overrides)
         if key in os.environ:
             return os.environ[key]
-        
-        # Then check .env file
-        try:
-            from dotenv import dotenv_values
-            config = dotenv_values(self.env_file)
-            return config.get(key, default)
-        except ImportError:
-            return default
+
+        # Then check .env file via AppConfig's pure-Python reader
+        from app_config import get_config
+        return get_config().read_env_file().get(key, default)
     
     def set_config_value(self, key: str, value: str) -> bool:
         """
         Set a configuration value in .env file.
-        
-        Args:
-            key: The configuration key.
-            value: The value to set.
-            
-        Returns:
-            True if successful.
         """
         # Don't store PASSWORD in .env - use keyring instead
         if key.upper() == "PASSWORD":
             return self.set_password(value)
-        
-        try:
-            from dotenv import set_key
-            
-            # Ensure file exists
-            Path(self.env_file).touch(exist_ok=True)
-            
-            set_key(self.env_file, key, str(value))
-            os.environ[key] = str(value)
-            return True
-        except ImportError:
-            print("[config] Warning: python-dotenv not installed")
-            return False
-        except Exception as e:
-            print(f"[config] Error setting {key}: {e}")
-            return False
+
+        from app_config import get_config
+        return get_config().write_env(key, str(value), env_path=self.env_file)
     
     # =========================================================================
     # Migration
@@ -213,31 +182,21 @@ class ConfigManager:
     
     def migrate_password_from_env(self) -> bool:
         """
-        Migrate PASSWORD from .env file to keyring.
-        
-        This is a one-time operation for existing installations.
-        
-        Returns:
-            True if migration occurred, False if no migration needed.
+        Migrate PASSWORD from .env file to keyring (one-time operation).
         """
         try:
-            from dotenv import dotenv_values, set_key
-            
-            config = dotenv_values(self.env_file)
-            env_password = config.get("PASSWORD")
-            
+            from app_config import get_config
+            cfg = get_config()
+            env_password = cfg.read_env_file(self.env_file).get("PASSWORD")
+
             if env_password:
-                # Store in keyring
                 if self.set_password(env_password):
-                    # Remove from .env file
                     self._remove_key_from_env("PASSWORD")
                     print("[config] Migrated PASSWORD from .env to secure keyring")
                     return True
-        except ImportError:
-            pass
         except Exception as e:
             print(f"[config] Migration error: {e}")
-        
+
         return False
     
     def _remove_key_from_env(self, key: str):
@@ -261,30 +220,19 @@ class ConfigManager:
     def load_all_config(self) -> dict:
         """
         Load all configuration (env + password).
-        
-        This maintains backward compatibility with the existing
-        load_env_vars() return format.
-        
-        Returns:
-            Dictionary with all configuration values.
+        Maintains backward compatibility with load_env_vars() return format.
         """
-        try:
-            from dotenv import load_dotenv
-            load_dotenv(self.env_file, override=True)
-        except ImportError:
-            pass
-        
+        from app_config import get_config
+        get_config().reload()
+
         # Run migration on first load
         self.migrate_password_from_env()
-        
-        # Load password into environment for backward compatibility
+
         password = self.get_password()
         if password:
             os.environ["PASSWORD"] = password
-        
-        return {
-            "password": password,
-        }
+
+        return {"password": password}
 
 
 # Module-level singleton for convenience

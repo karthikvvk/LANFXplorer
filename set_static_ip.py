@@ -20,7 +20,6 @@ import subprocess
 import platform
 import concurrent.futures
 
-from dotenv import set_key
 from app_config import get_config, reload_config
 
 
@@ -196,7 +195,7 @@ def assign_static_ip(interface_override=None):
 
     # Step 5: persist to .env
     env_path = os.path.join(pwd, ".env")
-    set_key(env_path, "HOST", free_ip)
+    get_config().write_env("HOST", free_ip, env_path=env_path)
     reload_config()
 
     print(f"[static-ip] ✓ Assigned {free_ip} on {iface}")

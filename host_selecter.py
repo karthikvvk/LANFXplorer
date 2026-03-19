@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 import os
 import sys
-from dotenv import load_dotenv, set_key
 
 # CRITICAL: Set up paths FIRST, before importing any local modules
 APP_DIR = Path(__file__).parent.resolve()
@@ -120,24 +119,10 @@ for i, h in enumerate(display_hosts):
             pass
 
         try:
-            set_key(".env", "DEST_HOST", sel_ip)
+            get_config().write_env("DEST_HOST", sel_ip)
+            get_config().reload()
         except Exception:
-            try:
-                envp = Path(".env")
-                lines = []
-                if envp.exists():
-                    lines = envp.read_text().splitlines()
-                out = {}
-                for line in lines:
-                    if "=" in line:
-                        k, v = line.split("=", 1)
-                        out[k.strip()] = v.strip()
-                out.update({"DEST_HOST": sel_ip})
-                with open(envp, "w") as f:
-                    for k, v in out.items():
-                        f.write(f"{k}={v}\n")
-            except Exception:
-                pass
+            pass
 
         os.environ["DEST_HOST"] = sel_ip
         st.session_state["REMOTE_HOST"] = sel_ip

@@ -7,15 +7,11 @@ import asyncio
 from ipaddress import IPv4Network, IPv4Address
 import concurrent.futures
 from typing import List, Set, Optional, Dict
-from dotenv import load_dotenv
+from app_config import AppConfig, get_config
 import requests
 import socket
 import time
 import sys
-
-# Import centralized configuration
-from app_config import AppConfig
-
 
 # ==================== GLOBAL STATE ====================
 host_ip = ""
@@ -63,21 +59,21 @@ def get_OS_TYPE(REMOTE_HOST: str = "") -> Dict:
 
 
 def update_env():
-    """Load environment variables from .env file."""
+    """Reload environment variables via AppConfig singleton."""
     global gateway, cidr, file_path, host_ip, broadcast, system_name, interface, user, pwd, dest_host
 
-    load_dotenv()
+    cfg = get_config()
+    cfg.reload()
 
-    host_ip = os.getenv("HOST", "")
-    cidr = os.getenv("CIDR", "24")
-    gateway = os.getenv("GATEWAY", "")
-    subnet = os.getenv("SUBNET", "255.255.255.0")
-    broadcast = os.getenv("BROADCAST", "")
-    interface = os.getenv("INTERFACE", "")
-    system_name = os.getenv("SYSTEM", platform.system().lower())
-    user = os.getenv("USER", getpass.getuser())
-    pwd = os.getenv("PWD", os.getcwd())
-    dest_host = os.getenv("DEST_HOST", "")
+    host_ip = cfg.host
+    cidr = cfg.cidr
+    gateway = cfg.gateway
+    broadcast = cfg.broadcast
+    interface = cfg.interface
+    system_name = cfg.system_type
+    user = cfg.user
+    pwd = cfg.pwd
+    dest_host = cfg.dest_host
 
     print(f"[+] Loaded scanner's environment variables")
     print(f"    Network: {gateway}/{cidr}")
