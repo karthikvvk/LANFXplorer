@@ -154,38 +154,30 @@ def main():
     print_status("info", "Cleaning services")
     cleanup_existing_services()
 
-    # ── connectivity check ──
-    def ping():
-        try:
-            return subprocess.run(["ping", "-c", "1", "-W", "2", "127.0.0.1"]).returncode == 0
-        except:
-            return False
+    # ── firewall punch-through (runs every launch, idempotent) ──────────────
+    # NOTE: Same-host port probes (loopback/LAN-IP from the same machine) bypass
+    # the INPUT chain entirely, so they always report "reachable" even when the
+    # firewall is blocking external clients. We therefore ALWAYS ensure rules are
+    # in place via the installer, which skips any rules that already exist (fast).
+    print_status("run", "Ensuring firewall rules for app ports…")
+    try:
+        fw_script = str(APP_DIR / "firewall_manager.py")
+        # sudo will prompt for password if the credential cache has expired;
+        # once rules exist the installer exits in under a second.
+        ret = subprocess.run(
+            ["sudo", sys.executable, fw_script, "--install"],
+            timeout=60
+        ).returncode
+        if ret == 0:
+            print_status("ok", "Firewall rules confirmed.")
+        else:
+            print_status("warn",
+                "Firewall setup returned non-zero — continuing anyway.\n"
+                f"  → If peers can't connect, run: sudo python3 firewall_manager.py --install"
+            )
+    except Exception as fw_err:
+        print_status("warn", f"Firewall setup skipped ({fw_err})")
 
-    if not ping():
-        print_status("warn", "Network issue detected")
-
-        try:
-            import tkinter as tk
-            from tkinter import messagebox
-
-            root = tk.Tk()
-            root.withdraw()
-
-            if messagebox.askyesno(
-                "Firewall Required",
-                "Fix firewall rules?\nRequires admin privileges."
-            ):
-                fw_script = str(APP_DIR / "firewall_manager.py")
-
-                if elevate_and_run(fw_script):
-                    print_status("ok", "Firewall configured")
-                else:
-                    print_status("fail", "Firewall setup failed")
-
-            root.destroy()
-
-        except Exception:
-            print_status("warn", "No GUI available")
 
     # ── setup ──
     if not run_script("startsetup.py", True):

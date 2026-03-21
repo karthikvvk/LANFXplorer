@@ -220,9 +220,26 @@ class _LandingPageState extends State<LandingPage> {
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
           const SizedBox(height: AppSpacing.lg),
-          Text(
-            'No devices found',
-            style: context.textStyles.titleLarge,
+          // "No devices found" label + inline Troubleshoot button
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'No devices found',
+                style: context.textStyles.titleLarge,
+              ),
+              const SizedBox(width: 8),
+              TextButton.icon(
+                onPressed: _showTroubleshoot,
+                icon: const Icon(Icons.build, size: 16),
+                label: const Text('Troubleshoot'),
+                style: TextButton.styleFrom(
+                  foregroundColor:
+                      Theme.of(context).colorScheme.onSurfaceVariant,
+                  textStyle: context.textStyles.bodySmall,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: AppSpacing.sm),
           Text(

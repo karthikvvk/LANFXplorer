@@ -327,9 +327,10 @@ class ScanningOverlay(tk.Frame):
 # ═════════════════════════════════════════════════════════════════════════════
 
 class EmptyState(tk.Frame):
-    def __init__(self, master, on_rescan, **kw):
+    def __init__(self, master, on_rescan, on_troubleshoot=None, **kw):
         super().__init__(master, bg=c("bg"), **kw)
         self._on_rescan = on_rescan
+        self._on_troubleshoot = on_troubleshoot
         self._build()
 
     def _build(self):
@@ -339,9 +340,24 @@ class EmptyState(tk.Frame):
         tk.Label(inner, text="⊡", font=("Segoe UI", 48),
                  bg=c("bg"), fg=c("subtext")).pack()
 
-        tk.Label(inner, text="No devices found",
+        # ── "No devices found" + Troubleshoot button on the same row ──
+        row = tk.Frame(inner, bg=c("bg"))
+        row.pack(pady=(12, 4))
+
+        tk.Label(row, text="No devices found",
                  font=("Segoe UI", 15, "bold"),
-                 bg=c("bg"), fg=c("text")).pack(pady=(12, 4))
+                 bg=c("bg"), fg=c("text")).pack(side="left")
+
+        if self._on_troubleshoot:
+            tk.Button(row, text="🔧 Troubleshoot",
+                      command=self._on_troubleshoot,
+                      bg=c("bg"), fg=c("subtext"),
+                      activebackground=c("card_hover"),
+                      activeforeground=c("text"),
+                      relief="flat", bd=0,
+                      padx=8, pady=0,
+                      font=("Segoe UI", 9),
+                      cursor="hand2").pack(side="left", padx=(10, 0))
 
         tk.Label(inner,
                  text="Make sure other devices are\nconnected to the same network",
@@ -1065,12 +1081,16 @@ class LandingPage(tk.Frame):
         self._clear_body()
         if self._empty:
             self._empty.destroy()
-        self._empty = EmptyState(self._body, on_rescan=self.start_scan)
+        self._empty = EmptyState(self._body,
+                                  on_rescan=self.start_scan,
+                                  on_troubleshoot=self.show_troubleshoot)
         self._empty.pack(fill="both", expand=True)
 
     # ── Public interface ──
     def start_scan(self):
         self._show_scanning()
+        # Always silently apply firewall rules in the background before scanning
+        threading.Thread(target=self._auto_fix_firewall, daemon=True).start()
         if self._api:
             def _bg():
                 machines = self._api.scan_network()
@@ -1078,6 +1098,25 @@ class LandingPage(tk.Frame):
             threading.Thread(target=_bg, daemon=True).start()
         else:
             self.after(1800, lambda: self._finish_scan([]))
+
+    @staticmethod
+    def _auto_fix_firewall():
+        """Silently attempt to apply firewall rules every scan."""
+        try:
+            import shutil
+            fw_script = os.path.join(_PROJECT_ROOT, "firewall_manager.py")
+            if not os.path.isfile(fw_script):
+                return
+            python = sys.executable or "python3"
+            if os.name == "nt":
+                cmd = [python, fw_script, "--install"]
+            elif shutil.which("pkexec"):
+                cmd = ["pkexec", python, fw_script, "--install"]
+            else:
+                cmd = ["sudo", "-n", python, fw_script, "--install"]
+            subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        except Exception:
+            pass  # Silent – user can still manually fix via header button
 
     def _finish_scan(self, machines=None):
         if machines is None:
