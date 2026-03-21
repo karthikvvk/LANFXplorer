@@ -249,28 +249,28 @@ class _MainPageState extends State<MainPage> {
                   label: 'Fetch',
                   onPressed: _onFetchFromDest,
                 ),
-                const SizedBox(width: AppSpacing.xs),
-                _ToolbarButton(
-                  icon: Icons.refresh,
-                  label: 'Reconnect',
-                  onPressed: _onReconnect,
-                ),
+                // const SizedBox(width: AppSpacing.xs),
+                // _ToolbarButton(
+                //   icon: Icons.refresh,
+                //   label: 'Reconnect',
+                //   onPressed: _onReconnect,
+                // ),
                 const SizedBox(width: AppSpacing.xs),
                 _ToolbarButton(
                   icon: Icons.history,
-                  label: 'History',
+                  label: '',
                   onPressed: _showTransferHistory,
                 ),
                 const SizedBox(width: AppSpacing.xs),
                 _ToolbarButton(
-                  icon: Icons.build,
-                  label: 'Troubleshoot',
+                  icon: Icons.error,
+                  label: '',
                   onPressed: _showTroubleshoot,
                 ),
                 const SizedBox(width: AppSpacing.xs),
                 _ToolbarButton(
-                  icon: Icons.home,
-                  label: 'Home',
+                  icon: Icons.exit_to_app,
+                  label: 'Exit',
                   onPressed: _onHome,
                 ),
                 const SizedBox(width: AppSpacing.xs),
@@ -352,20 +352,30 @@ class _ToolbarButton extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final buttonColor = isDestructive ? colorScheme.error : colorScheme.primary;
 
+    final style = OutlinedButton.styleFrom(
+      padding: EdgeInsets.symmetric(
+        horizontal: label.isEmpty ? AppSpacing.md : AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
+      side: BorderSide(
+          color: isDestructive
+              ? colorScheme.error.withValues(alpha: 0.5)
+              : colorScheme.outline.withValues(alpha: 0.3)),
+    );
+
+    if (label.isEmpty) {
+      return OutlinedButton(
+        onPressed: onPressed,
+        style: style,
+        child: Icon(icon, size: 18, color: buttonColor),
+      );
+    }
+
     return OutlinedButton.icon(
       onPressed: onPressed,
       icon: Icon(icon, size: 18, color: buttonColor),
       label: Text(label, style: TextStyle(color: buttonColor)),
-      style: OutlinedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: AppSpacing.sm,
-        ),
-        side: BorderSide(
-            color: isDestructive
-                ? colorScheme.error.withValues(alpha: 0.5)
-                : colorScheme.outline.withValues(alpha: 0.3)),
-      ),
+      style: style,
     );
   }
 }

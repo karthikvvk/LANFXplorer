@@ -77,8 +77,20 @@ async def main() -> None:
     if ca_mgr.check_ca_status():
         # We have CA keys locally — but first, check if another CA already exists on the network.
         # This prevents a dual-CA split if a previous CA session left keys behind.
+        # Use full looped discovery (same as the no-keys branch and test script) so we
+        # retry every 2 s instead of missing the CA with a single shot.
         print("[receiver] CA keys found locally. Probing network for existing CA...")
-        existing_ca = await ca_mgr.probe_ca_on_network(timeout=3.0)
+        ca_mgr.is_ca = False  # force peer mode so we broadcast WHO_IS_CA
+        await ca_mgr.start_discovery()
+        print("[receiver] Broadcasting 'WHO_IS_CA' (waiting up to 10 seconds)...")
+        try:
+            await asyncio.wait_for(ca_mgr.ca_found_event.wait(), timeout=10.0)
+            existing_ca = ca_mgr.ca_info
+        except asyncio.TimeoutError:
+            existing_ca = None
+        ca_mgr.stop_discovery()
+        # Reset the event so it can be used again if we need to re-enter discovery later
+        ca_mgr.ca_found_event.clear()
 
         if existing_ca:
             # Another CA is live on the network — defer to it

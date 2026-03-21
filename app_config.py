@@ -60,7 +60,7 @@ class AppConfig:
         (4435, "tcp", "CA Signing",          True),
         (4436, "udp", "Peer Discovery",      True),
         (4437, "tcp", "Handshake Service",   True),
-        (5000, "tcp", "Flask API (local)",   False),
+        (5000, "tcp", "Flask API",            True),   # peers reach each other on :5000 for listdir/osinfo/handshake etc.
     ]
     
     # ==================== PROTOCOL CONSTANTS ====================

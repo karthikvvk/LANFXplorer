@@ -67,7 +67,7 @@ REQUIRED_PORTS: List[Tuple[int, str, str, bool]] = [
     (AppConfig.CA_SIGNING_PORT,     "tcp", "CA Signing",          True),
     (AppConfig.PEER_DISCOVERY_PORT, "udp", "Peer Discovery",      True),
     (AppConfig.HANDSHAKE_PORT,      "tcp", "Handshake Service",   True),
-    (AppConfig.API_PORT,            "tcp", "Flask API (local)",    False),
+    (AppConfig.API_PORT,            "tcp", "Flask API",            True),  # peers reach each other on :5000 for listdir/osinfo/handshake etc.
 ]
 
 # ICMP (ping) is needed for the startup connectivity check

@@ -159,24 +159,24 @@ def main():
     # the INPUT chain entirely, so they always report "reachable" even when the
     # firewall is blocking external clients. We therefore ALWAYS ensure rules are
     # in place via the installer, which skips any rules that already exist (fast).
-    print_status("run", "Ensuring firewall rules for app ports…")
-    try:
-        fw_script = str(APP_DIR / "firewall_manager.py")
-        # sudo will prompt for password if the credential cache has expired;
-        # once rules exist the installer exits in under a second.
-        ret = subprocess.run(
-            ["sudo", sys.executable, fw_script, "--install"],
-            timeout=60
-        ).returncode
-        if ret == 0:
-            print_status("ok", "Firewall rules confirmed.")
-        else:
-            print_status("warn",
-                "Firewall setup returned non-zero — continuing anyway.\n"
-                f"  → If peers can't connect, run: sudo python3 firewall_manager.py --install"
-            )
-    except Exception as fw_err:
-        print_status("warn", f"Firewall setup skipped ({fw_err})")
+    # print_status("run", "Ensuring firewall rules for app ports…")
+    # try:
+    #     fw_script = str(APP_DIR / "firewall_manager.py")
+    #     # sudo will prompt for password if the credential cache has expired;
+    #     # once rules exist the installer exits in under a second.
+    #     ret = subprocess.run(
+    #         ["sudo", sys.executable, fw_script, "--install"],
+    #         timeout=60
+    #     ).returncode
+    #     if ret == 0:
+    #         print_status("ok", "Firewall rules confirmed.")
+    #     else:
+    #         print_status("warn",
+    #             "Firewall setup returned non-zero — continuing anyway.\n"
+    #             f"  → If peers can't connect, run: sudo python3 firewall_manager.py --install"
+    #         )
+    # except Exception as fw_err:
+    #     print_status("warn", f"Firewall setup skipped ({fw_err})")
 
 
     # ── setup ──
