@@ -172,6 +172,14 @@ def assign_static_ip(interface_override=None):
     # Step 1: bring up the interface with a temp IP
     print(f"[static-ip] Bringing up {iface} with temp IP {TEMP_IP}/{CIDR}")
     if system_type.startswith("linux"):
+        # Tell NetworkManager to leave this interface alone before we touch it.
+        # Without this, nmcli auto-config races against our manual ip addr calls
+        # and can silently overwrite the temp IP mid-scan.
+        print(f"[static-ip] Disabling NetworkManager management for {iface}")
+        subprocess.run(
+            f"sudo nmcli device set {iface} managed no",
+            shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
         _bring_up_linux(iface)
     elif system_type.startswith("win"):
         _bring_up_windows(iface)
