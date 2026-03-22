@@ -244,7 +244,7 @@ def calculate_optimal_chunk_size(speed_mbps: Optional[float] = None, file_size_b
     if speed <= 50.0:
         chunk = 64 * 1024        # 64 KB  — slow link
     elif speed <= 150.0:
-        chunk = 2 * 1024 * 1024       # 512 KB — standard WiFi (802.11n / 100 Mbps Ethernet)
+        chunk = 512 * 1024       # 512 KB — standard WiFi (802.11n / 100 Mbps Ethernet)
     elif speed <= 500.0:
         chunk = 1024 * 1024      # 1 MB   — fast WiFi (802.11ac)
     else:
