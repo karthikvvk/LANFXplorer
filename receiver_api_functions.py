@@ -246,7 +246,7 @@ async def _handle_stream(
             os.makedirs(parent_dir, exist_ok=True)
         
         bytes_written = 0
-        chunk_size = calculate_optimal_chunk_size()
+        chunk_size = calculate_optimal_chunk_size(file_size_bytes=filesize)
         with open(path, "wb") as f:
             while True:
                 chunk = await reader.read(chunk_size)

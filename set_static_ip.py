@@ -8,8 +8,8 @@ nobody responds to.
 Flow:
   1. Guard: only runs for Ethernet interfaces (eth/enp/ens/en), NOT wlan/wl.
   2. Bring interface up with a temp IP so we can ping the subnet.
-  3. Ping-scan 192.168.0.2–254 concurrently.
-  4. First IP with no reply → assign it permanently.
+  3. Ping 192.168.0.2, .3, .4 … in order — first non-responding IP is taken.
+  4. First free IP → assign it permanently.
 
 Called automatically by startsetup.py when no network IP is detected.
 Supports: Linux, Windows (including 32-bit headless).
@@ -18,7 +18,6 @@ Supports: Linux, Windows (including 32-bit headless).
 import os
 import subprocess
 import platform
-import concurrent.futures
 
 from app_config import get_config, reload_config
 
@@ -28,7 +27,11 @@ GATEWAY     = "192.168.0.1"
 CIDR        = "24"
 SUBNET_MASK = "255.255.255.0"
 BROADCAST   = "192.168.0.255"
-TEMP_IP     = "192.168.0.200"          # used only to bring the link up
+# NOTE: TEMP_IP is in the 192.168.224.x subnet — a completely different range from
+# the 192.168.0.x range we assign into.  This ensures the temp address never
+# appears as a "free" candidate and cannot conflict with the peer's scan.
+TEMP_IP     = "192.168.0.223"       # used only to bring the link up
+TEMP_CIDR   = "24"                    # /24 for the temp subnet
 IP_RANGE    = range(2, 255)            # .2 through .254
 
 
@@ -65,17 +68,23 @@ def _ping_ok(ip: str, system_type: str) -> bool:
 
 
 def _find_free_ip(system_type: str) -> str | None:
-    """Ping-scan the subnet and return the first IP that does NOT reply."""
-    ips = [f"192.168.0.{i}" for i in IP_RANGE if f"192.168.0.{i}" != TEMP_IP]
+    """
+    Probe IPs in sequential order (.2, .3, .4 …) and return the first one
+    that does NOT reply to a ping.
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as pool:
-        futures = {pool.submit(_ping_ok, ip, system_type): ip for ip in ips}
-        for future in concurrent.futures.as_completed(futures):
-            ip = futures[future]
-            if not future.result():        # no reply → it's free
-                # Cancel remaining work so we don't wait
-                pool.shutdown(wait=False, cancel_futures=True)
-                return ip
+    Sequential order is critical for collision avoidance in Ethernet P2P:
+      - Peer A starts first → pings .2, no reply → takes .2, brings it up.
+      - Peer B starts later → pings .2, gets a reply from A → skips to .3.
+    A concurrent/random scan would cause both peers to race and both claim .2.
+    """
+    for i in IP_RANGE:
+        ip = f"192.168.0.{i}"
+        if ip == TEMP_IP:          # skip the temp address (different subnet anyway)
+            continue
+        alive = _ping_ok(ip, system_type)
+        print(f"[static-ip]   ping {ip} → {'alive (skip)' if alive else 'free  ✓'}")
+        if not alive:
+            return ip              # nobody answered → take it
     return None
 
 
@@ -85,7 +94,8 @@ def _bring_up_linux(interface: str):
     """Assign a temp IP on Linux so the interface can send pings."""
     subprocess.run(f"sudo ip addr flush dev {interface}",
                    shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run(f"sudo ip addr add {TEMP_IP}/{CIDR} dev {interface}",
+    # Use TEMP_CIDR (temp subnet /24) — TEMP_IP is in 192.168.224.x
+    subprocess.run(f"sudo ip addr add {TEMP_IP}/{TEMP_CIDR} dev {interface}",
                    shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run(f"sudo ip link set dev {interface} up",
                    shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -97,10 +107,11 @@ def _bring_up_windows(interface: str):
         f"Get-NetIPAddress -InterfaceAlias '{interface}' -AddressFamily IPv4 "
         f"| Remove-NetIPAddress -Confirm:$false"
     ], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Use TEMP_CIDR for the temp subnet (192.168.224.x)
     subprocess.run([
         "powershell", "-Command",
         f"New-NetIPAddress -InterfaceAlias '{interface}' "
-        f"-IPAddress '{TEMP_IP}' -PrefixLength {CIDR}"
+        f"-IPAddress '{TEMP_IP}' -PrefixLength {TEMP_CIDR}"
     ], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 

@@ -212,16 +212,21 @@ def get_wifi_speed():
         return None
 
 
-def calculate_optimal_chunk_size(speed_mbps: Optional[float] = None) -> int:
+def calculate_optimal_chunk_size(speed_mbps: Optional[float] = None, file_size_bytes: Optional[int] = None) -> int:
     """
-    Calculate optimal chunk size for file transfers based on negotiated WiFi speed.
-    
+    Calculate optimal chunk size for file transfers based on negotiated link speed
+    and (optionally) the file size.
+
     Larger chunks reduce per-chunk overhead and better utilise fast links.
     Smaller chunks keep memory usage low on slow connections.
-    
+    For large files (>500 MB) the chunk is doubled (up to 4 MB) to cut the
+    number of read/send cycles significantly.
+
     Args:
-        speed_mbps: Negotiated WiFi speed in Mbps, or None to auto-detect.
-        
+        speed_mbps:      Negotiated link speed in Mbps, or None to auto-detect.
+        file_size_bytes: Size of the file being transferred, or None to skip the
+                         large-file adjustment.
+
     Returns:
         Chunk size in bytes.
     """
@@ -232,18 +237,25 @@ def calculate_optimal_chunk_size(speed_mbps: Optional[float] = None) -> int:
         speed = float(val)
     else:
         speed = float(speed_mbps)
-    
+
     if speed <= 0.0:
         return 64 * 1024  # 64 KB fallback
-    
+
     if speed <= 50.0:
-        return 64 * 1024       # 64 KB  — slow link
+        chunk = 64 * 1024        # 64 KB  — slow link
     elif speed <= 150.0:
-        return 256 * 1024      # 256 KB — standard WiFi (802.11n)
+        chunk = 2 * 1024 * 1024       # 512 KB — standard WiFi (802.11n / 100 Mbps Ethernet)
     elif speed <= 500.0:
-        return 512 * 1024      # 512 KB — fast WiFi (802.11ac)
+        chunk = 1024 * 1024      # 1 MB   — fast WiFi (802.11ac)
     else:
-        return 1024 * 1024     # 1 MB   — very fast WiFi / Ethernet
+        chunk = 2 * 1024 * 1024  # 2 MB   — very fast WiFi / Ethernet
+
+    # For large files (>500 MB) double the chunk to reduce overhead cycles.
+    # Cap at 4 MB to avoid excessive memory pressure.
+    if file_size_bytes and file_size_bytes > 500 * 1024 * 1024:
+        chunk = min(chunk * 2, 4 * 1024 * 1024)
+
+    return chunk
 
 
 def estimate_transfer_time_seconds(file_size_bytes: int, speed_mbps: Optional[float] = None) -> float:

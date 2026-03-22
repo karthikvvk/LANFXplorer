@@ -105,7 +105,7 @@ async def send_file(connection: QuicSenderConnection, file_path: str) -> None:
     header = _build_header(header_name, filesize)
 
     reader, writer = await connection.protocol.create_stream()
-    chunk_size = calculate_optimal_chunk_size()
+    chunk_size = calculate_optimal_chunk_size(file_size_bytes=filesize)
 
     writer.write(header)
     with open(abs_path, "rb") as f:
@@ -188,7 +188,7 @@ async def send_file_with_progress(
     header = _build_header(header_name, filesize)
 
     reader, writer = await connection.protocol.create_stream()
-    chunk_size = calculate_optimal_chunk_size()
+    chunk_size = calculate_optimal_chunk_size(file_size_bytes=filesize)
 
     writer.write(header)
     bytes_sent = 0
