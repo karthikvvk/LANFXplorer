@@ -44,23 +44,25 @@ class AppConfig:
     
     # ==================== CENTRALIZED PORT CONSTANTS ====================
     # These are the canonical port definitions for the entire application
-    QUIC_PORT = 4433          # QUIC File Transfer
+    QUIC_PORT = 4433          # QUIC File Transfer + AUTH (Method 3)
     CA_DISCOVERY_PORT = 4434  # CA Discovery (UDP)
     CA_SIGNING_PORT = 4435    # CA Signing Service (TCP)
     PEER_DISCOVERY_PORT = 4436  # Peer Discovery (UDP)
-    HANDSHAKE_PORT = 4437     # Handshake Service (TCP)
+    # DEPRECATED: HANDSHAKE_PORT kept for reference only — TCP:4437 listener removed
+    # Auth now runs inside QUIC control streams on port 4433 (Method 3 / Stage 3)
+    HANDSHAKE_PORT = 4437     # DEPRECATED — no longer bound
     API_PORT = 5000           # API Bridge (Flask)
-    
+
     # ==================== PORT REGISTRY (for firewall management) ====================
     # Each entry: (port, protocol, description, expose_to_network)
     # expose_to_network=False means localhost-only (no firewall rule needed)
+    # NOTE: Port 4437 (TCP HandshakeService) removed — auth is QUIC-native (Method 3)
     REQUIRED_PORTS = [
-        (4433, "udp", "QUIC File Transfer",  True),
-        (4434, "udp", "CA Discovery",        True),
-        (4435, "tcp", "CA Signing",          True),
-        (4436, "udp", "Peer Discovery",      True),
-        (4437, "tcp", "Handshake Service",   True),
-        (5000, "tcp", "Flask API",            True),   # peers reach each other on :5000 for listdir/osinfo/handshake etc.
+        (4433, "udp", "QUIC File Transfer + AUTH", True),
+        (4434, "udp", "CA Discovery",              True),
+        (4435, "tcp", "CA Signing",                True),
+        (4436, "udp", "Peer Discovery",            True),
+        (5000, "tcp", "Flask API",                 True),
     ]
     
     # ==================== PROTOCOL CONSTANTS ====================

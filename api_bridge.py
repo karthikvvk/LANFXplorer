@@ -812,56 +812,60 @@ def verify_peer_password():
 
 @app.route('/handshake', methods=['POST'])
 def handshake():
+    """
+    Authenticate with a remote peer over QUIC (Method 3 — Stage 3).
+
+    Previously connected to TCP:4437 (HandshakeService).
+    Now opens a QUIC connection to port 4433, sends an AUTH control-stream
+    message, and returns AUTH_OK / AUTH_FAIL — no TCP involved.
+    """
     try:
         data = request.get_json() or {}
         dest_host = data.get('dest_host')
         password = data.get('password')
-        
+
         if not dest_host:
             return jsonify({'success': False, 'error': 'dest_host is required'}), 400
-        
+
         if not password:
             return jsonify({'success': False, 'error': 'password is required'}), 400
-        
-        # Get environment for certificate paths
+
         env = load_env_vars()
         client_cert = env.get('certi') or 'cert.pem'
-        ca_cert = env.get('ca_cert') or 'ca_cert.pem'
-        
-        # Check if certificates exist
+        client_key  = env.get('key')   or 'key.pem'
+        ca_cert     = env.get('ca_cert') or 'ca_cert.pem'
+
         if not os.path.isfile(client_cert):
-            return jsonify({
-                'success': False,
-                'error': f'Client certificate not found: {client_cert}'
-            }), 500
-        
+            return jsonify({'success': False, 'error': f'Client certificate not found: {client_cert}'}), 500
+
         if not os.path.isfile(ca_cert):
-            return jsonify({
-                'success': False,
-                'error': f'CA certificate not found: {ca_cert}'
-            }), 500
-        
-        # Perform handshake asynchronously
-        from pki.handshake import initiate_handshake
-        
-        async def _do_handshake():
-            return await initiate_handshake(
+            return jsonify({'success': False, 'error': f'CA certificate not found: {ca_cert}'}), 500
+
+        # ── Method 3: auth via QUIC control stream (no TCP) ──────────────────
+        from pki.handshake import quic_handshake
+
+        async def _do_quic_auth():
+            return await quic_handshake(
                 dest_host=dest_host,
                 password=password,
-                client_cert_path=client_cert,
-                ca_cert_path=ca_cert
+                client_cert=client_cert,
+                client_key=client_key,
+                ca_cert=ca_cert,
             )
-        
-        success = asyncio.run(_do_handshake())
-        
+
+        print(f"[handshake] Initiating QUIC AUTH with {dest_host}...")
+        success = asyncio.run(_do_quic_auth())
+
         if success:
+            print(f"[handshake] ✓ QUIC AUTH_OK from {dest_host}")
             return jsonify({'success': True}), 200
         else:
+            print(f"[handshake] ✗ QUIC AUTH_FAIL from {dest_host}")
             return jsonify({
                 'success': False,
                 'error': 'Authentication failed. Check password or peer availability.'
             }), 401
-        
+
     except Exception as e:
         print(f"[!] Handshake error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500

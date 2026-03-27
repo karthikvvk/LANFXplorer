@@ -10,6 +10,7 @@ import os
 import sys
 import signal
 import getpass
+import time
 from pathlib import Path
 
 # CRITICAL: Set up paths FIRST, before importing any local modules
@@ -205,29 +206,22 @@ async def main() -> None:
     peer_listener = await start_peer_discovery_listener(ca_ip)
     print(f"[receiver] Peer discovery active on UDP port {AppConfig.PEER_DISCOVERY_PORT}")
 
-    from pki.handshake import start_handshake_service
-    
     if not ca_cert:
         ca_cert = os.path.join(os.getcwd(), "ca_cert.pem")
         print(f"[receiver] CA_CERT not in env, using default: {ca_cert}")
-    
+
     if not os.path.isfile(ca_cert):
         print(f"[receiver] ERROR: CA certificate not found: {ca_cert}")
         print(f"[receiver] Please run 'python startsetup.py' first to initialize certificates")
         sys.exit(1)
-    
+
     # Password is loaded from secure keyring storage via config_manager
+    # Authentication now happens over QUIC control streams (Method 3)
     password = get_password()
     if not password:
         print(f"[receiver] WARNING: PASSWORD not set. Use config manager to set password.")
     else:
-        print(f"[receiver] Password authentication enabled")
-    
-    handshake_service = await start_handshake_service(
-        host=ca_ip,
-        cert_path=cert_path,
-        ca_cert_path=ca_cert
-    )
+        print(f"[receiver] Password authentication enabled (QUIC-native AUTH stream)")
 
     server = await start_receiver(
         host=recivhost,
@@ -242,11 +236,11 @@ async def main() -> None:
 
     print(f"[receiver] QUIC Receiver listening on {recivhost}:{port}")
     print(f"[receiver] All services running:")
-    print(f"           - Peer Discovery (UDP:{AppConfig.PEER_DISCOVERY_PORT})")
-    print(f"           - Handshake Service (TCP:{AppConfig.HANDSHAKE_PORT})")
-    print(f"           - QUIC File Transfer (UDP:{port})")
+    print(f"           - Peer Discovery      (UDP:{AppConfig.PEER_DISCOVERY_PORT})")
+    print(f"           - QUIC File Transfer  (UDP:{port})  [AUTH + FILE streams]")
     if ca_mgr.check_ca_status():
-        print(f"           - CA Service (UDP:{AppConfig.CA_DISCOVERY_PORT}, TCP:{AppConfig.CA_SIGNING_PORT})")
+        print(f"           - CA Service          (UDP:{AppConfig.CA_DISCOVERY_PORT}, TCP:{AppConfig.CA_SIGNING_PORT})")
+    print("[receiver] NOTE: TCP HandshakeService removed — auth is QUIC-native (Method 3)")
     print("[receiver] Press Ctrl+C to stop.")
 
     # === FIXED: Proper shutdown handling with asyncio.Event ===
@@ -270,8 +264,6 @@ async def main() -> None:
         await stop_receiver(server)
         if peer_listener:
             peer_listener.stop()
-        if handshake_service:
-            await handshake_service.stop()
         print("[receiver] Server stopped.")
 
 
