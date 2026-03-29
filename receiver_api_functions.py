@@ -167,6 +167,7 @@ async def _handle_stream(
     # ------------------------------------------------------------------
     # Control stream — read the JSON control message first.
     # ------------------------------------------------------------------
+    _ctrl_stream_owns_eof = True  # set to False if a FILE is registered
     try:
         # TLS cert extraction (best-effort — aioquic limitation)
         tls_cert_pem = None
@@ -200,13 +201,19 @@ async def _handle_stream(
 
         # --------------------------------------------------------------
         # FILE  – validate, then register pending data stream
+        # The ctrl stream writer lifetime is passed to _handle_data_stream
+        # which sends the final ack.  Do NOT write_eof here.
         # --------------------------------------------------------------
         if msg_type == "FILE":
-            await _handle_file_ctrl(
+            # Pass ownership flag: if FILE was registered we must NOT
+            # close the ctrl stream in our finally block below.
+            registered = await _handle_file_ctrl(
                 msg, reader, writer, stream_id, protocol,
                 tls_fp, tls_cert_pem,
                 on_file_received, save_dir, require_client_cert,
             )
+            if registered:
+                _ctrl_stream_owns_eof = False
             return
 
         # Unknown type
@@ -219,11 +226,14 @@ async def _handle_stream(
         print(f"[receiver] Stream {stream_id} error: {exc}")
         print(traceback.format_exc())
     finally:
-        try:
-            writer.write_eof()
-            await writer.drain()
-        except Exception:
-            pass
+        # Only close the ctrl stream if we are not handing it off to
+        # _handle_data_stream (which sends the final ack and owns EOF).
+        if _ctrl_stream_owns_eof:
+            try:
+                writer.write_eof()
+                await writer.drain()
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +251,9 @@ async def _handle_file_ctrl(
     on_file_received,
     save_dir,
     require_client_cert: bool,
-) -> None:
+) -> bool:
+    """Handle a FILE control message. Returns True if a pending data-stream
+    was registered (caller must NOT close ctrl stream), False otherwise."""
     header_fp       = (msg.get("fp") or "").lower() or None
     filename_raw    = msg.get("filename", "")
     filesize        = int(msg.get("filesize", 0))
@@ -340,6 +352,11 @@ async def _handle_file_ctrl(
         print("[receiver] WARNING: no stream-id correlation info; reading data inline.")
         await _drain_data_inline(reader, path, filesize, chunk_size,
                                  on_file_received, writer)
+        return False   # inline mode: this function owns everything
+
+    # Data stream is coming on a separate stream.  Return True so the
+    # caller knows NOT to close the ctrl stream writer.
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -362,23 +379,40 @@ async def _handle_data_stream(
 
     try:
         bytes_written = 0
-        with open(path, "wb") as f:
+        # Open the file ONCE and keep a reference — the write calls are
+        # dispatched to a thread pool so the asyncio event loop is NEVER
+        # blocked.  This is critical: a blocked event loop cannot send QUIC
+        # window-update frames (MAX_STREAM_DATA), which would stall the
+        # sender and eventually cause an idle-timeout connection drop.
+        loop = asyncio.get_running_loop()
+        f = await loop.run_in_executor(None, lambda: open(path, "wb"))
+        try:
             while True:
                 chunk = await reader.read(chunk_size)
                 if not chunk:
                     break
-                f.write(chunk)
+                # f.write is synchronous; run it in the thread-pool so the
+                # event loop stays free to process incoming QUIC packets.
+                await loop.run_in_executor(None, f.write, chunk)
                 bytes_written += len(chunk)
+        finally:
+            await loop.run_in_executor(None, f.close)
 
         print(f"[receiver] ✓ File saved: {path} ({bytes_written} bytes)")
         await _call_callback(pending.on_file_received, path, bytes_written)
 
-        # Send final ack on the control stream — drain before closing
+        # Send final ack on the control stream then close both streams
         try:
             await _write_json(ctrl_writer, {"status": "OK"})
             await ctrl_writer.drain()
         except Exception:
             pass
+        finally:
+            try:
+                ctrl_writer.write_eof()
+                await ctrl_writer.drain()
+            except Exception:
+                pass
 
     except Exception as exc:
         import traceback
@@ -389,6 +423,12 @@ async def _handle_data_stream(
             await ctrl_writer.drain()
         except Exception:
             pass
+        finally:
+            try:
+                ctrl_writer.write_eof()
+                await ctrl_writer.drain()
+            except Exception:
+                pass
     finally:
         try:
             writer.write_eof()
@@ -406,13 +446,17 @@ async def _drain_data_inline(reader, path, filesize, chunk_size,
     """Read remaining bytes on the same stream (degraded / legacy mode)."""
     try:
         bytes_written = 0
-        with open(path, "wb") as f:
+        loop = asyncio.get_running_loop()
+        f = await loop.run_in_executor(None, lambda: open(path, "wb"))
+        try:
             while True:
                 chunk = await reader.read(chunk_size)
                 if not chunk:
                     break
-                f.write(chunk)
+                await loop.run_in_executor(None, f.write, chunk)
                 bytes_written += len(chunk)
+        finally:
+            await loop.run_in_executor(None, f.close)
         print(f"[receiver] ✓ File saved (inline): {path} ({bytes_written} bytes)")
         await _call_callback(on_file_received, path, bytes_written)
         await _write_json(ctrl_writer, {"status": "OK"})
@@ -445,6 +489,12 @@ async def start_receiver(
 
     config = QuicConfiguration(is_client=False, alpn_protocols=[alpn_protocol])
     config.load_cert_chain(certificate, private_key)
+    # Allow transfers to run for up to 1 hour without QUIC dropping the connection.
+    # Without this, aioquic's default idle_timeout can fire mid-transfer on large files.
+    config.idle_timeout = 3600.0
+    # Increase flow-control windows so the sender isn't throttled prematurely.
+    config.max_data = 128 * 1024 * 1024          # 128 MB connection window
+    config.max_stream_data = 128 * 1024 * 1024   # 128 MB per-stream window
 
     if ca_cert:
         config.load_verify_locations(cafile=ca_cert)

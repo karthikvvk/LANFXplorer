@@ -109,6 +109,10 @@ async def quic_connect(
         alpn_protocols=[alpn_protocol],
         server_name=server_name or host,
     )
+    # Match the receiver's QUIC parameters for large-file robustness.
+    config.idle_timeout = 3600.0               # 1 hour — large files take time
+    config.max_data = 128 * 1024 * 1024        # 128 MB connection window
+    config.max_stream_data = 128 * 1024 * 1024 # 128 MB per-stream window
 
     if ca_cert:
         config.load_verify_locations(cafile=ca_cert)
@@ -199,21 +203,22 @@ async def send_file(connection: QuicSenderConnection, file_path: str) -> None:
             if not chunk:
                 break
             data_writer.write(chunk)
+            await data_writer.drain()  # drain per-chunk so QUIC flow control is respected
 
-    await data_writer.drain()
     data_writer.write_eof()
-    # Give the QUIC stack time to flush before reading the ctrl ack
-    await asyncio.sleep(0)
+    await asyncio.sleep(0)  # yield so QUIC can flush
 
-    # Final ack on ctrl stream — wait up to 30s for receiver to write file
+    # Final ack: scale timeout with file size.
+    # Assume minimum 5 MB/s throughput; add 120 s for disk-write overhead.
+    ack_timeout = max(60.0, min(3600.0, filesize / (5 * 1024 * 1024) + 120))
     try:
-        final = await asyncio.wait_for(_read_json(ctrl_reader), timeout=30.0)
+        final = await asyncio.wait_for(_read_json(ctrl_reader), timeout=ack_timeout)
         if final.get("status") != "OK":
             print(f"[sender] Final ack error: {final}")
         else:
             print(f"[sender] ✓ Transfer confirmed by receiver")
     except asyncio.TimeoutError:
-        print(f"[sender] Warning: no final ack received within 30s (file may still have been saved)")
+        print(f"[sender] Warning: no final ack within {ack_timeout:.0f}s (file may still have been saved)")
     except Exception as e:
         print(f"[sender] Error reading final ack: {e}")
 
@@ -293,18 +298,19 @@ async def send_file_with_progress(
 
     await data_writer.drain()
     data_writer.write_eof()
-    # Give the QUIC stack time to flush before reading the ctrl ack
-    await asyncio.sleep(0)
+    await asyncio.sleep(0)  # yield so QUIC can flush
 
-    # Final ack on ctrl stream — wait up to 30s for receiver to write file
+    # Final ack: scale timeout with file size.
+    # Assume minimum 5 MB/s throughput; add 120 s for disk-write overhead.
+    ack_timeout = max(60.0, min(3600.0, filesize / (5 * 1024 * 1024) + 120))
     try:
-        final = await asyncio.wait_for(_read_json(ctrl_reader), timeout=30.0)
+        final = await asyncio.wait_for(_read_json(ctrl_reader), timeout=ack_timeout)
         if final.get("status") != "OK":
             print(f"[sender] Final ack error: {final}")
         else:
             print(f"[sender] ✓ Transfer confirmed by receiver ({bytes_sent} bytes)")
     except asyncio.TimeoutError:
-        print(f"[sender] Warning: no final ack received within 30s (file may still have been saved)")
+        print(f"[sender] Warning: no final ack within {ack_timeout:.0f}s (file may still have been saved)")
     except Exception as e:
         print(f"[sender] Error reading final ack: {e}")
 
