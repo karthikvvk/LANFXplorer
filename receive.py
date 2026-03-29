@@ -221,7 +221,14 @@ async def main() -> None:
     if not password:
         print(f"[receiver] WARNING: PASSWORD not set. Use config manager to set password.")
     else:
-        print(f"[receiver] Password authentication enabled (QUIC-native AUTH stream)")
+        print(f"[receiver] Password authentication enabled (TCP:4437 HandshakeService)")
+
+    # ── TCP auth service (port 4437) ─────────────────────────────────────────
+    # Password auth uses a threaded TCP server so keyring / D-Bus calls never
+    # block the asyncio event loop used by the QUIC stack.
+    from pki.handshake import HandshakeService
+    handshake_svc = HandshakeService(host=recivhost, port=AppConfig.HANDSHAKE_PORT)
+    handshake_svc.start()
 
     server = await start_receiver(
         host=recivhost,
@@ -237,10 +244,10 @@ async def main() -> None:
     print(f"[receiver] QUIC Receiver listening on {recivhost}:{port}")
     print(f"[receiver] All services running:")
     print(f"           - Peer Discovery      (UDP:{AppConfig.PEER_DISCOVERY_PORT})")
-    print(f"           - QUIC File Transfer  (UDP:{port})  [AUTH + FILE streams]")
+    print(f"           - TCP Auth            (TCP:{AppConfig.HANDSHAKE_PORT})")
+    print(f"           - QUIC File Transfer  (UDP:{port})  [FILE streams only]")
     if ca_mgr.check_ca_status():
         print(f"           - CA Service          (UDP:{AppConfig.CA_DISCOVERY_PORT}, TCP:{AppConfig.CA_SIGNING_PORT})")
-    print("[receiver] NOTE: TCP HandshakeService removed — auth is QUIC-native (Method 3)")
     print("[receiver] Press Ctrl+C to stop.")
 
     # === FIXED: Proper shutdown handling with asyncio.Event ===
@@ -262,6 +269,7 @@ async def main() -> None:
     finally:
         print("[receiver] Shutting down gracefully...")
         await stop_receiver(server)
+        handshake_svc.stop()
         if peer_listener:
             peer_listener.stop()
         print("[receiver] Server stopped.")

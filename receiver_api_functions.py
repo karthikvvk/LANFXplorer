@@ -10,9 +10,12 @@ Each inbound transfer uses two QUIC streams:
                →  4-byte big-endian JSON length + JSON final ack  (on ctrl)
 
 The receiver's stream_handler is called for every new stream.  When a
-control-type stream arrives (type == FILE or AUTH) we handle it here.
-When a data stream arrives (its QUIC stream-id matches a pending entry)
-we drain bytes to disk.
+FILE control stream arrives we handle it here.  When a data stream arrives
+(its QUIC stream-id matches a pending entry) we drain bytes to disk.
+
+NOTE ON AUTH: Password authentication is handled exclusively by the
+HandshakeService TCP server (port 4437, pki/handshake.py).  AUTH messages
+do NOT travel over QUIC.  Any stream carrying type=="AUTH" is rejected.
 
 Stream-ID correlation:
   The sender embeds "data_stream_id" in the control JSON.
@@ -44,7 +47,6 @@ from pki.store import PeerStore
 from pki.utils import fingerprint_pem, verify_cert_validity, get_peer_cert_pem_from_writer
 from path_security import validate_path_access, get_lanfxplorer_root
 from wifi_speed import calculate_optimal_chunk_size
-from config_manager import get_password as _get_keyring_password
 
 
 # ---------------------------------------------------------------------------
@@ -183,10 +185,17 @@ async def _handle_stream(
         msg_type = msg.get("type", "FILE")
 
         # --------------------------------------------------------------
-        # AUTH
+        # AUTH messages must NOT arrive over QUIC.
+        # Authentication is handled exclusively by HandshakeService on
+        # TCP:4437.  Reject any stale/rogue AUTH stream immediately.
         # --------------------------------------------------------------
         if msg_type == "AUTH":
-            await _handle_auth(msg, writer, tls_fp, tls_cert_pem)
+            print(f"[receiver] WARN: Rejected AUTH message on QUIC stream {stream_id}. "
+                  "Auth must use TCP:4437 (HandshakeService).")
+            await _write_json(writer, {
+                "status": "REJECTED",
+                "reason": "auth_over_quic_not_allowed",
+            })
             return
 
         # --------------------------------------------------------------
@@ -215,41 +224,6 @@ async def _handle_stream(
             await writer.drain()
         except Exception:
             pass
-
-
-# ---------------------------------------------------------------------------
-# AUTH handler
-# ---------------------------------------------------------------------------
-
-async def _handle_auth(msg: dict, writer, tls_fp: Optional[str], tls_cert_pem) -> None:
-    header_fp = (msg.get("fp") or "").lower() or None
-    password   = msg.get("password", "")
-    auth_fp    = tls_fp or header_fp
-
-    peer_store = PeerStore()
-    if auth_fp and peer_store.get_peer_status(auth_fp) == "rejected":
-        await _write_json(writer, {"status": "AUTH_FAIL", "reason": "rejected_peer"})
-        return
-
-    # Read password from keyring (same source as handshake service used)
-    # Fall back to env var for backward compatibility in test environments
-    expected_pass = _get_keyring_password() or os.environ.get("PASSWORD")
-    if not expected_pass:
-        print("[receiver] AUTH: no password configured in keyring or env")
-        await _write_json(writer, {"status": "AUTH_FAIL", "reason": "no_password_set"})
-        return
-
-    if password == expected_pass:
-        if auth_fp:
-            store = PeerStore()
-            store.update_peer_status(auth_fp, "trusted")
-            print(f"[receiver] Peer {auth_fp[:8]}... authenticated via QUIC AUTH → TRUSTED")
-        else:
-            print("[receiver] Peer authenticated via QUIC AUTH (no cert fingerprint)")
-        await _write_json(writer, {"status": "AUTH_OK"})
-    else:
-        print(f"[receiver] QUIC AUTH FAILED for {tls_fp or 'unknown'}")
-        await _write_json(writer, {"status": "AUTH_FAIL", "reason": "invalid_password"})
 
 
 # ---------------------------------------------------------------------------

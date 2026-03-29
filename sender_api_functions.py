@@ -19,17 +19,14 @@ Protocol:
       "data_stream_id": <int>   -- QUIC stream ID of the paired data stream
     }
 
-  Auth message schema (control stream only, no data stream):
-    { "type": "AUTH",
-      "password": "<plaintext>",
-      "fp":       "<cert fingerprint or null>"
-    }
-
   Ack schema:
     { "status": "OK" }
     { "status": "REJECTED", "reason": "..." }
-    { "status": "AUTH_OK" }
-    { "status": "AUTH_FAIL", "reason": "..." }
+
+NOTE ON AUTH:
+  Password authentication is NOT done over QUIC.  Use tcp_handshake() from
+  pki/handshake.py, which connects to the remote HandshakeService on TCP:4437.
+  No AUTH messages travel over QUIC streams.
 """
 
 import asyncio
@@ -356,38 +353,6 @@ async def send_bytes(
         pass
 
     ctrl_writer.write_eof()
-
-
-# ---------------------------------------------------------------------------
-# send_auth  (control stream only — no data stream)
-# ---------------------------------------------------------------------------
-
-async def send_auth(connection: QuicSenderConnection, password: str) -> bool:
-    fp = _fp_from_conn(connection)
-    if fp:
-        fp = fp.lower()
-
-    try:
-        ctrl_reader, ctrl_writer = await connection.protocol.create_stream()
-
-        await _write_json(ctrl_writer, {
-            "type": "AUTH",
-            "password": password,
-            "fp": fp,
-        })
-
-        print("[send_auth] Sent auth request, waiting for response...")
-        response = await _read_json(ctrl_reader)
-        print(f"[send_auth] Received response: {response}")
-
-        ctrl_writer.write_eof()
-        return response.get("status") == "AUTH_OK"
-
-    except Exception as e:
-        print(f"[send_auth] ERROR: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
 
 
 # ---------------------------------------------------------------------------

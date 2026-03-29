@@ -813,11 +813,16 @@ def verify_peer_password():
 @app.route('/handshake', methods=['POST'])
 def handshake():
     """
-    Authenticate with a remote peer over QUIC (Method 3 — Stage 3).
+    Authenticate with a remote peer over TCP (port 4437, HandshakeService).
 
-    Previously connected to TCP:4437 (HandshakeService).
-    Now opens a QUIC connection to port 4433, sends an AUTH control-stream
-    message, and returns AUTH_OK / AUTH_FAIL — no TCP involved.
+    Flow
+    ----
+    1. Sender opens a TCP socket to dest_host:4437.
+    2. Sends: { "type": "AUTH", "password": "...", "fp": "<cert fp>" }
+    3. Receiver's HandshakeService thread verifies password via keyring.
+    4. Returns: { "status": "AUTH_OK" } or { "status": "AUTH_FAIL", ... }
+
+    No QUIC / UDP is involved in the handshake process.
     """
     try:
         data = request.get_json() or {}
@@ -841,11 +846,13 @@ def handshake():
         if not os.path.isfile(ca_cert):
             return jsonify({'success': False, 'error': f'CA certificate not found: {ca_cert}'}), 500
 
-        # ── Method 3: auth via QUIC control stream (no TCP) ──────────────────
-        from pki.handshake import quic_handshake
+        # ── Pure TCP handshake (port 4437, HandshakeService) ──────────────────────
+        # No QUIC involved. tcp_handshake() opens a plain TCP socket,
+        # sends the password, reads AUTH_OK / AUTH_FAIL, then closes it.
+        from pki.handshake import tcp_handshake
 
-        async def _do_quic_auth():
-            return await quic_handshake(
+        async def _do_tcp_auth():
+            return await tcp_handshake(
                 dest_host=dest_host,
                 password=password,
                 client_cert=client_cert,
@@ -853,14 +860,14 @@ def handshake():
                 ca_cert=ca_cert,
             )
 
-        print(f"[handshake] Initiating QUIC AUTH with {dest_host}...")
-        success = asyncio.run(_do_quic_auth())
+        print(f"[handshake] Initiating TCP AUTH with {dest_host}:4437...")
+        success = asyncio.run(_do_tcp_auth())
 
         if success:
-            print(f"[handshake] ✓ QUIC AUTH_OK from {dest_host}")
+            print(f"[handshake] ✓ AUTH_OK from {dest_host}")
             return jsonify({'success': True}), 200
         else:
-            print(f"[handshake] ✗ QUIC AUTH_FAIL from {dest_host}")
+            print(f"[handshake] ✗ AUTH_FAIL from {dest_host}")
             return jsonify({
                 'success': False,
                 'error': 'Authentication failed. Check password or peer availability.'
