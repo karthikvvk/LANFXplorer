@@ -150,6 +150,52 @@ def elevate_and_run(script_path: str):
     return elevated_ok
 
 
+def wait_for_interface_ready(timeout: int = 20) -> bool:
+    """
+    Poll until the IP written by startsetup.py is actually assigned on the
+    interface reported in .env.  This closes the race-window between
+    nmcli activating the p2p-link and Flask/receiver trying to bind.
+
+    Returns True if the IP became visible before *timeout* seconds,
+    False if we timed out (callers should continue anyway with a warning).
+    """
+    import re as _re
+    from app_config import get_config
+
+    try:
+        cfg = get_config()
+        cfg.reload()
+        iface   = cfg.interface
+        host_ip = cfg.host
+    except Exception:
+        return False
+
+    if not iface or not host_ip:
+        return False
+
+    # Loopback or already-known-good addresses need no wait
+    if host_ip.startswith("127."):
+        return True
+
+    print_status("run", f"Waiting for {iface} to be ready with IP {host_ip}...")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            out = subprocess.check_output(
+                ["ip", "-o", "-4", "addr", "show", iface],
+                text=True, stderr=subprocess.DEVNULL
+            )
+            if host_ip in out:
+                print_status("ok", f"{iface} is up with {host_ip}")
+                return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+
+    print_status("warn", f"Timed out waiting for {iface}/{host_ip} — continuing anyway")
+    return False
+
+
 def main():
     print_status("info", "Cleaning services")
     cleanup_existing_services()
@@ -183,13 +229,16 @@ def main():
     if not run_script("startsetup.py", True):
         return
 
-    time.sleep(2)
+    # Wait for the network interface to be fully ready before binding services.
+    # This prevents Flask from displaying 127.0.0.1 instead of the real IP,
+    # and ensures the QUIC receiver won't bind before the p2p-link is active.
+    wait_for_interface_ready(timeout=20)
 
     receiver = run_script("receive.py", False)
     if not receiver:
         return
 
-    time.sleep(5)
+    time.sleep(3)
 
     api = run_script("api_bridge.py", False)
 

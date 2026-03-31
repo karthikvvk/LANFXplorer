@@ -54,6 +54,21 @@ def get_root_path():
 
 # ==================================================================
 
+
+def get_time():
+    def decorator(func):
+        from functools import wraps
+        import time
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            start = time.time()
+            result = func(*args, **kwargs)
+            duration = time.time() - start
+            print(f"[get_time] {func.__name__} took {duration:.4f} seconds")
+            return result
+        return wrapper
+    return decorator
+
 _transfer_tasks = {}  # task_id -> {status, progress, total_size, transferred, files, error, start_time, estimated_duration}
 
 # Mapping of task_id -> remote_host for fetch operations that need to proxy status requests
@@ -423,8 +438,8 @@ def list_directory():
     #     }), 500
 
 
-
 @app.route("/send_files", methods=["POST"])
+@get_time()
 def send_files():
     data = request.get_json() or {}
     files = data.get("files", [])

@@ -21,6 +21,8 @@ user = getpass.getuser()
 system_type = platform.system().lower()
 
 interface = None
+ethernet_interface = None   # best wired Ethernet iface detected (if any)
+wifi_interface = None        # best WiFi iface detected (if any)
 subnet = None
 broadcast_address = None
 gateway = None
@@ -38,66 +40,45 @@ reciv_host = "0.0.0.0"
 ca_cert = os.path.join(pwd, "ca_cert.pem")
 
 def detect_interface():
-    global host_ip, cidr, interface, system_type, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
+    global host_ip, cidr, interface, ethernet_interface, wifi_interface, system_type, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
 
     if system_type.startswith("linux"):
 
-        out = subprocess.check_output(["ip", "-o", "-4", "addr"], text=True).strip()
+        # Scan ALL physical interfaces by NAME regardless of IP state.
+        # Using `ip link` (not `ip -o -4 addr`) so we detect Ethernet hardware
+        # even when the cable is unplugged or p2p-link has not been activated yet.
+        link_out = subprocess.check_output(["ip", "-o", "link", "show"], text=True).strip()
+        if not link_out:
+            raise RuntimeError("No interfaces found (ip link returned empty)")
 
-        if not out:
-            raise RuntimeError("No IPv4 addresses found (ip returned empty)")
+        SKIP       = ("lo", "veth", "docker", "br-", "cni0", "virbr", "vmnet")
+        ETH_PREFS  = ("eth", "enp", "ens", "eno", "en", "lan")
+        WIFI_PREFS = ("wlan", "wlp", "wl")
+        ethernet_interface = None
+        wifi_interface = None
 
-        candidates = []
-        for line in out.splitlines():
-           
-           
-            m = re.match(r'^\d+:\s+([^:\s]+)\s+inet\s+([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+)', line)
-            if not m:
+        for line in link_out.splitlines():
+            lm = re.match(r'^\d+:\s+([^:@\s]+)', line)
+            if not lm:
                 continue
-            name = m.group(1)
-            low = name.lower()
-
-            if low in ("lo",) or low.startswith(("veth", "docker", "br-", "cni0", "virbr", "vmnet")):
+            name = lm.group(1)
+            low  = name.lower()
+            if low == "lo" or any(low.startswith(s) for s in SKIP):
                 continue
-            candidates.append(name)
+            if ethernet_interface is None and low.startswith(ETH_PREFS):
+                ethernet_interface = name
+            if wifi_interface is None and low.startswith(WIFI_PREFS):
+                wifi_interface = name
 
-        if not candidates:
-            # Phase 2: find interfaces that are UP or DOWN but have no IPv4 address yet
-            print("[!] No interface with IPv4 found — checking for available physical interfaces...")
-            link_out = subprocess.check_output(["ip", "-o", "link", "show"], text=True).strip()
-            for line in link_out.splitlines():
-                if "state UP" not in line and "state DOWN" not in line and "state UNKNOWN" not in line:
-                    continue
-                lm = re.match(r'^\d+:\s+([^:@\s]+)', line)
-                if not lm:
-                    continue
-                name = lm.group(1)
-                low = name.lower()
-                if low in ("lo",) or low.startswith(("veth", "docker", "br-", "cni0", "virbr", "vmnet")):
-                    continue
-                candidates.append(name)
-
-            if not candidates:
-                raise RuntimeError("[-] No non-virtual, non-loopback interface found (not even without IP)")
-
-
-        prefs = ("eth", "enp", "ens", "en", "wlan", "wl")
-        interface = None
-        for pref in prefs:
-            for c in candidates:
-                if c.startswith(pref):
-                    interface = c
-                    break
-            if interface:
-                break
-
-
+        interface = ethernet_interface or wifi_interface
         if not interface:
-            interface = candidates[0]
+            raise Exception("[-] No Ethernet or WiFi interface found")
 
-        if not interface:
-            raise Exception("[-] No Ethernet interface found")
         print("[+] Detected interface:", interface)
+        if ethernet_interface:
+            print("[+] Ethernet interface:", ethernet_interface)
+        if wifi_interface:
+            print("[+] WiFi interface:    ", wifi_interface)
 
     elif system_type.startswith("win") or system_type.startswith("nt"):
         cmd = [
@@ -118,7 +99,58 @@ def detect_interface():
         if not interface:
             raise Exception("[-] No Ethernet interface found")
 
-def get_network_info():
+def _get_iface_ip(iface: str):
+    """Return (ip_str, cidr_str) for *iface*, or (None, None) if no IPv4 is assigned."""
+    try:
+        out = subprocess.check_output(["ip", "-o", "-4", "addr", "show", iface], text=True)
+        m = re.search(r'inet\s+([\d\.]+)/(\d+)', out)
+        if m:
+            return m.group(1), m.group(2)
+    except Exception:
+        pass
+    return None, None
+
+
+def _fill_network_from_ip(ip: str, cidr_str: str = "24"):
+    """Populate global subnet / gateway / broadcast derived from a known *ip*/*cidr_str*."""
+    global host_ip, cidr, subnet, gateway, broadcast_address
+    host_ip = ip
+    cidr = cidr_str
+    mask_int = (0xFFFFFFFF << (32 - int(cidr))) & 0xFFFFFFFF
+    subnet = socket.inet_ntoa(struct.pack("!I", mask_int))
+    ip_int    = struct.unpack("!I", socket.inet_aton(host_ip))[0]
+    subnet_int = struct.unpack("!I", socket.inet_aton(subnet))[0]
+    network_int   = ip_int & subnet_int
+    broadcast_int = network_int | (~subnet_int & 0xFFFFFFFF)
+    gateway_int   = network_int + 1
+    gateway           = socket.inet_ntoa(struct.pack("!I", gateway_int))
+    broadcast_address = socket.inet_ntoa(struct.pack("!I", broadcast_int))
+
+
+def _check_p2p_connection():
+    """
+    Query NetworkManager for the 'p2p-link' connection profile state.
+
+    Returns:
+        "active"   — profile exists and is currently activated
+        "inactive" — profile exists but is not active
+        "missing"  — no 'p2p-link' profile found
+    """
+    try:
+        out = subprocess.check_output(
+            ["nmcli", "-t", "-f", "NAME,STATE", "con", "show"],
+            text=True, stderr=subprocess.DEVNULL
+        )
+        for line in out.splitlines():
+            if line.startswith("p2p-link:"):
+                state = line.split(":", 1)[1].strip()
+                return "active" if state == "activated" else "inactive"
+    except Exception:
+        pass
+    return "missing"
+
+
+
 
     global host_ip, cidr, interface, system_type, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
 
@@ -243,7 +275,7 @@ def load_env_vars():
     }
 
 def write_env(installer=False):
-    global host_ip, cidr, interface, system_type, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
+    global host_ip, cidr, interface, ethernet_interface, wifi_interface, system_type, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
     detect_interface()
     ls = os.listdir(pwd)
     if "key.pem" not in ls or "cert.pem" not in ls:
@@ -286,38 +318,69 @@ def write_env(installer=False):
                 ))
             with open("cert.pem", "wb") as f:
                 f.write(cert.public_bytes(serialization.Encoding.PEM))
-    try:
+    # ── Network detection: Ethernet / WiFi priority tree ─────────────────────
+    has_eth  = ethernet_interface is not None
+    has_wifi = wifi_interface is not None
+
+    if has_eth:
+        interface = ethernet_interface
+        p2p_status = _check_p2p_connection()
+        eth_ip,  eth_cidr = None, "24"
+
+        if p2p_status == "active":
+            # Profile is running — grab the IP it assigned
+            eth_ip, eth_cidr = _get_iface_ip(ethernet_interface)
+            if eth_ip:
+                print(f"[+] p2p-link active — using {eth_ip}")
+            else:
+                # Activated but IP not visible yet — treat as inactive
+                print("[!] p2p-link active but IP not visible — re-activating...")
+                p2p_status = "inactive"
+
+        if p2p_status == "inactive":        # separate `if` allows fall-through from above
+            print("[!] p2p-link exists but is down — bringing it up...")
+            subprocess.run(
+                ["nmcli", "con", "up", "p2p-link"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            # Poll until the IP appears (up to 10 s)
+            import time as _t
+            deadline = _t.time() + 10
+            while _t.time() < deadline:
+                eth_ip, eth_cidr = _get_iface_ip(ethernet_interface)
+                if eth_ip:
+                    break
+                _t.sleep(0.5)
+            if eth_ip:
+                print(f"[+] p2p-link brought up — using {eth_ip}")
+            else:
+                raise RuntimeError(
+                    f"p2p-link activated but no IP appeared on {ethernet_interface}")
+
+        elif p2p_status == "missing":
+            # No profile at all — run ping-scan + create nmcli p2p-link
+            if has_wifi:
+                print("[!] No p2p-link (WiFi active) — scanning + creating P2P profile...")
+            else:
+                print("[!] No p2p-link — scanning + creating P2P profile...")
+            from set_static_ip import assign_static_ip
+            chosen = assign_static_ip(interface_override=ethernet_interface)
+            if not chosen:
+                raise RuntimeError("Could not assign a static IP on Ethernet")
+            eth_ip, eth_cidr = chosen, "24"
+
+        _fill_network_from_ip(eth_ip, eth_cidr or "24")
+        if has_wifi:
+            print(f"[+] Ethernet + WiFi — P2P on {eth_ip} (WiFi stays active)")
+
+    elif has_wifi:
+        # ── WiFi only — use existing network config, no static IP needed ──────
+        print("[+] WiFi-only mode — using existing network configuration")
         get_network_info()
-    except Exception:
-        # No network IP found — fall back to static IP assignment
-        print("[!] No network IP detected — assigning a static IP...")
-        from set_static_ip import assign_static_ip
-        chosen = assign_static_ip(interface_override=interface)
-        if not chosen:
-            raise RuntimeError("Could not obtain or assign a network IP")
-        # Update globals from the assigned IP
-        host_ip = chosen
-        ip_parts = list(map(int, host_ip.split('.')))
-        if ip_parts[0] == 10:
-            cidr = "8"
-            subnet = "255.0.0.0"
-        elif ip_parts[0] == 172 and 16 <= ip_parts[1] <= 31:
-            cidr = "16"
-            subnet = "255.255.0.0"
-        elif ip_parts[0] == 192 and ip_parts[1] == 168:
-            cidr = "24"
-            subnet = "255.255.255.0"
-        else:
-            cidr = "24"
-            subnet = "255.255.255.0"
-        import struct as _struct
-        ip_int = _struct.unpack("!I", socket.inet_aton(host_ip))[0]
-        subnet_int = _struct.unpack("!I", socket.inet_aton(subnet))[0]
-        network_int = ip_int & subnet_int
-        broadcast_int = network_int | (~subnet_int & 0xFFFFFFFF)
-        gateway_int = network_int + 1
-        gateway = socket.inet_ntoa(_struct.pack("!I", gateway_int))
-        broadcast_address = socket.inet_ntoa(_struct.pack("!I", broadcast_int))
+
+    else:
+        raise RuntimeError("[-] No network interface found (no Ethernet, no WiFi) — cannot start")
+
 
     # Ensure Lanfxplorer directory exists and use it for OUTDIR/SRCDIR
     secure_root = ensure_lanfxplorer_directory()

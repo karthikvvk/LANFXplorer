@@ -118,14 +118,58 @@ def _bring_up_windows(interface: str):
 # ─── Final configuration ───────────────────────────────────────────
 
 def _configure_linux(adapter, ip):
-    cmds = [
-        f"sudo ip addr flush dev {adapter}",
-        f"sudo ip addr add {ip}/{CIDR} dev {adapter}",
-        f"sudo ip link set dev {adapter} up",
-    ]
-    for cmd in cmds:
-        print(f"[static-ip] {cmd}")
-        subprocess.run(cmd, shell=True)
+    """
+    Assign *ip* permanently on *adapter* via a NetworkManager connection profile.
+
+    Why nmcli instead of raw `ip addr`:
+      - NM profiles survive reboots and cable reconnects (autoconnect=yes).
+      - No gateway / DNS is set → existing internet routes are untouched.
+      - Route 192.168.0.0/24 is scoped only to this interface, keeping P2P
+        traffic off the default route.
+      - Idempotent: the old "p2p-link" profile is deleted first, so re-running
+        always produces a clean, correct state.
+
+    NOTE: The interface was set to `managed no` earlier (for the ping-scan
+    phase).  We re-enable management here before handing control back to NM.
+    """
+
+    # ── 1. Hand the interface back to NetworkManager ──
+    print(f"[static-ip] Re-enabling NetworkManager management for {adapter}")
+    subprocess.run(
+        f"sudo nmcli device set {adapter} managed yes",
+        shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+
+    # ── 2. Remove any existing p2p-link profile (idempotent) ──
+    print("[static-ip] Removing old 'p2p-link' profile (if any)")
+    subprocess.run(
+        "sudo nmcli con delete p2p-link",
+        shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )  # ignoring exit code — it's fine if the profile didn't exist
+
+    # ── 3. Create a fresh persistent connection profile ──
+    nmcli_add = (
+        f"sudo nmcli con add "
+        f"type ethernet "
+        f"con-name \"p2p-link\" "
+        f"ifname {adapter} "
+        f"ipv4.method manual "
+        f"ipv4.addresses {ip}/{CIDR} "
+        f"ipv4.gateway \"\" "
+        f"ipv4.routes \"192.168.0.0/24\" "
+        f"ipv4.dns \"\" "
+        f"ipv6.method disabled "
+        f"connection.autoconnect yes"
+    )
+    print(f"[static-ip] {nmcli_add}")
+    result = subprocess.run(nmcli_add, shell=True)
+    if result.returncode != 0:
+        print(f"[static-ip] ✗ nmcli con add failed (rc={result.returncode})")
+        return
+
+    # ── 4. Activate the profile ──
+    print("[static-ip] nmcli con up \"p2p-link\"")
+    subprocess.run("sudo nmcli con up \"p2p-link\"", shell=True)
 
 
 def _configure_windows(adapter, ip):
