@@ -203,26 +203,29 @@ async def send_file(connection: QuicSenderConnection, file_path: str) -> None:
     # --- Data stream ---
     _, data_writer = await connection.protocol.create_stream()
     chunk_size = calculate_optimal_chunk_size(file_size_bytes=filesize)
-    # FLUSH_INTERVAL: how many bytes to buffer before yielding the event loop.
-    # On a Gigabit LAN (~125 MB/s) we must yield frequently so aioquic can:
-    #   1. Dispatch queued packets to UDP (drain)
-    #   2. Process incoming ACKs from the receiver
-    #   3. Advance the CWND (congestion window) — without this CWND stalls
-    #   4. Send MAX_STREAM_DATA window-update frames to unblock the sender
-    # 256 KB => ~500 yields/sec at full GigE speed — negligible CPU overhead.
-    FLUSH_INTERVAL = 256 * 1024   # yield every 256 KB
+    # KEY INSIGHT: f.read() is SYNCHRONOUS — it blocks the asyncio event loop
+    # for the entire duration of the disk read.  On NVMe at ~3 GB/s:
+    #   1 MB read  ≈ 0.3 ms ≈ 1 GigE RTT   ← safe, event loop gets CPU quickly
+    #  16 MB read  ≈ 5  ms ≈ 17 GigE RTTs  ← CWND collapses, ACKs pile up
+    # chunk_size (from wifi_speed) is used by the RECEIVER's async reader only.
+    # The sender must use a small, fixed DISK_READ_CHUNK.
+    DISK_READ_CHUNK = 1 * 1024 * 1024   # 1 MB per blocking disk read
+    # After accumulating FLUSH_INTERVAL bytes, yield to let aioquic:
+    #   1. Process incoming ACKs → grow CWND
+    #   2. Send MAX_STREAM_DATA window updates to prevent flow-control stall
+    # 4 MB = 4 disk reads × 0.3ms = yield every ~1.2ms ≈ 4 RTTs — solid cadence.
+    FLUSH_INTERVAL = 4 * 1024 * 1024   # yield every 4 MB
     buffered = 0
 
     with open(abs_path, "rb") as f:
         while True:
-            chunk = f.read(chunk_size)
+            chunk = f.read(DISK_READ_CHUNK)  # small read → short block → event loop stays alive
             if not chunk:
                 break
             data_writer.write(chunk)
             buffered += len(chunk)
             if buffered >= FLUSH_INTERVAL:
-                await data_writer.drain()  # push queued data into UDP packets NOW
-                await asyncio.sleep(0)     # yield so aioquic processes ACKs / grows CWND
+                await asyncio.sleep(0)   # yield: aioquic processes ACKs, grows CWND
                 buffered = 0
 
     data_writer.write_eof()
@@ -302,19 +305,23 @@ async def send_file_with_progress(
     _, data_writer = await connection.protocol.create_stream()
     chunk_size = calculate_optimal_chunk_size(file_size_bytes=filesize)
     bytes_sent = 0
-    # FLUSH_INTERVAL: how many bytes to buffer before yielding the event loop.
-    # On a Gigabit LAN (~125 MB/s) we must yield frequently so aioquic can:
-    #   1. Dispatch queued packets to UDP (drain)
-    #   2. Process incoming ACKs from the receiver
-    #   3. Advance the CWND (congestion window) — without this CWND stalls
-    #   4. Send MAX_STREAM_DATA window-update frames to unblock the sender
-    # 256 KB => ~500 yields/sec at full GigE speed — negligible CPU overhead.
-    FLUSH_INTERVAL = 256 * 1024   # yield every 256 KB
+    # KEY INSIGHT: f.read() is SYNCHRONOUS — it blocks the asyncio event loop
+    # for the entire duration of the disk read.  On NVMe at ~3 GB/s:
+    #   1 MB read  ≈ 0.3 ms ≈ 1 GigE RTT   ← safe, event loop gets CPU quickly
+    #  16 MB read  ≈ 5  ms ≈ 17 GigE RTTs  ← CWND collapses, ACKs pile up
+    # chunk_size (from wifi_speed) is used by the RECEIVER's async reader only.
+    # The sender must use a small, fixed DISK_READ_CHUNK.
+    DISK_READ_CHUNK = 1 * 1024 * 1024   # 1 MB per blocking disk read
+    # After accumulating FLUSH_INTERVAL bytes, yield to let aioquic:
+    #   1. Process incoming ACKs → grow CWND
+    #   2. Send MAX_STREAM_DATA window updates to prevent flow-control stall
+    # 4 MB = 4 disk reads × 0.3ms = yield every ~1.2ms ≈ 4 RTTs — solid cadence.
+    FLUSH_INTERVAL = 4 * 1024 * 1024   # yield every 4 MB
     buffered = 0
 
     with open(abs_path, "rb") as f:
         while True:
-            chunk = f.read(chunk_size)
+            chunk = f.read(DISK_READ_CHUNK)  # small read → short block → event loop stays alive
             if not chunk:
                 break
             data_writer.write(chunk)
@@ -326,13 +333,7 @@ async def send_file_with_progress(
                 except Exception:
                     pass
             if buffered >= FLUSH_INTERVAL:
-                # Yield to the event loop so aioquic can:
-                # 1. Flush queued stream data into UDP packets (drain)
-                # 2. Process incoming ACKs from the receiver
-                # 3. Advance the congestion window (CWND)
-                # 4. Send MAX_STREAM_DATA window-update frames
-                await data_writer.drain()  # push queued data into UDP packets NOW
-                await asyncio.sleep(0)     # yield so aioquic processes ACKs / grows CWND
+                await asyncio.sleep(0)   # yield: aioquic processes ACKs, grows CWND
                 buffered = 0
 
     data_writer.write_eof()
