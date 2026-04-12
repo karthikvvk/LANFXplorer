@@ -111,8 +111,8 @@ async def quic_connect(
     )
     # Match the receiver's QUIC parameters for large-file robustness.
     config.idle_timeout = 3600.0               # 1 hour — large files take time
-    config.max_data = 128 * 1024 * 1024        # 128 MB connection window
-    config.max_stream_data = 128 * 1024 * 1024 # 128 MB per-stream window
+    config.max_data = 256 * 1024 * 1024        # 256 MB connection window
+    config.max_stream_data = 256 * 1024 * 1024 # 256 MB per-stream window
     # LAN optimisations: correct the RTT estimate immediately so QUIC slow-start
     # grows the congestion window at LAN speed (~0.3 ms RTT), not at the default
     # aioquic estimate of 100 ms which is designed for internet paths.
@@ -203,13 +203,14 @@ async def send_file(connection: QuicSenderConnection, file_path: str) -> None:
     # --- Data stream ---
     _, data_writer = await connection.protocol.create_stream()
     chunk_size = calculate_optimal_chunk_size(file_size_bytes=filesize)
-    # How often to yield the event loop back to aioquic while reading the file.
-    # Without periodic yields, the asyncio event loop never runs during the read
-    # loop: aioquic can't send packets, can't process incoming ACKs, and the
-    # congestion window never grows — which is why single-drain-at-end was still slow.
-    # FLUSH_INTERVAL: flush the aioquic send buffer every N bytes so the network
-    # pipe stays full while we continue reading the next chunk from disk.
-    FLUSH_INTERVAL = 8 * 1024 * 1024   # yield every 8 MB queued
+    # FLUSH_INTERVAL: how many bytes to buffer before yielding the event loop.
+    # On a Gigabit LAN (~125 MB/s) we must yield frequently so aioquic can:
+    #   1. Dispatch queued packets to UDP (drain)
+    #   2. Process incoming ACKs from the receiver
+    #   3. Advance the CWND (congestion window) — without this CWND stalls
+    #   4. Send MAX_STREAM_DATA window-update frames to unblock the sender
+    # 256 KB => ~500 yields/sec at full GigE speed — negligible CPU overhead.
+    FLUSH_INTERVAL = 256 * 1024   # yield every 256 KB
     buffered = 0
 
     with open(abs_path, "rb") as f:
@@ -220,9 +221,8 @@ async def send_file(connection: QuicSenderConnection, file_path: str) -> None:
             data_writer.write(chunk)
             buffered += len(chunk)
             if buffered >= FLUSH_INTERVAL:
-                # Yield once so aioquic can flush queued packets to the OS and
-                # process any incoming ACKs / flow-control updates from receiver.
-                await asyncio.sleep(0)
+                await data_writer.drain()  # push queued data into UDP packets NOW
+                await asyncio.sleep(0)     # yield so aioquic processes ACKs / grows CWND
                 buffered = 0
 
     data_writer.write_eof()
@@ -302,7 +302,14 @@ async def send_file_with_progress(
     _, data_writer = await connection.protocol.create_stream()
     chunk_size = calculate_optimal_chunk_size(file_size_bytes=filesize)
     bytes_sent = 0
-    FLUSH_INTERVAL = 8 * 1024 * 1024   # yield every 8 MB queued
+    # FLUSH_INTERVAL: how many bytes to buffer before yielding the event loop.
+    # On a Gigabit LAN (~125 MB/s) we must yield frequently so aioquic can:
+    #   1. Dispatch queued packets to UDP (drain)
+    #   2. Process incoming ACKs from the receiver
+    #   3. Advance the CWND (congestion window) — without this CWND stalls
+    #   4. Send MAX_STREAM_DATA window-update frames to unblock the sender
+    # 256 KB => ~500 yields/sec at full GigE speed — negligible CPU overhead.
+    FLUSH_INTERVAL = 256 * 1024   # yield every 256 KB
     buffered = 0
 
     with open(abs_path, "rb") as f:
@@ -320,13 +327,12 @@ async def send_file_with_progress(
                     pass
             if buffered >= FLUSH_INTERVAL:
                 # Yield to the event loop so aioquic can:
-                # 1. Flush queued stream data into UDP packets
+                # 1. Flush queued stream data into UDP packets (drain)
                 # 2. Process incoming ACKs from the receiver
-                # 3. Advance the congestion window
-                # Without this yield, the entire event loop is blocked by the
-                # synchronous file-read loop and nothing is actually sent over
-                # the wire until all data has been buffered in memory.
-                await asyncio.sleep(0)
+                # 3. Advance the congestion window (CWND)
+                # 4. Send MAX_STREAM_DATA window-update frames
+                await data_writer.drain()  # push queued data into UDP packets NOW
+                await asyncio.sleep(0)     # yield so aioquic processes ACKs / grows CWND
                 buffered = 0
 
     data_writer.write_eof()

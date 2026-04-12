@@ -392,6 +392,12 @@ async def _handle_data_stream(
         WRITE_BUF_SIZE = 64 * 1024 * 1024  # 64 MB
         buf = bytearray()
         try:
+            bytes_since_yield = 0
+            # READ_YIELD_INTERVAL: yield the event loop periodically so aioquic
+            # can send MAX_STREAM_DATA window-update frames back to the sender.
+            # Without this, the sender's flow-control window empties and it stalls.
+            # 4 MB interval => sender is never starved of window credits at GigE speeds.
+            READ_YIELD_INTERVAL = 4 * 1024 * 1024
             while True:
                 chunk = await reader.read(chunk_size)
                 if not chunk:
@@ -403,6 +409,10 @@ async def _handle_data_stream(
                         buf.clear()
                     break
                 buf.extend(chunk)
+                bytes_since_yield += len(chunk)
+                if bytes_since_yield >= READ_YIELD_INTERVAL:
+                    await asyncio.sleep(0)   # send window-update frames to sender
+                    bytes_since_yield = 0
                 if len(buf) >= WRITE_BUF_SIZE:
                     data = bytes(buf)
                     await loop.run_in_executor(None, f.write, data)
@@ -464,6 +474,8 @@ async def _drain_data_inline(reader, path, filesize, chunk_size,
         WRITE_BUF_SIZE = 64 * 1024 * 1024  # 64 MB write buffer
         buf = bytearray()
         try:
+            bytes_since_yield = 0
+            READ_YIELD_INTERVAL = 4 * 1024 * 1024
             while True:
                 chunk = await reader.read(chunk_size)
                 if not chunk:
@@ -474,6 +486,10 @@ async def _drain_data_inline(reader, path, filesize, chunk_size,
                         buf.clear()
                     break
                 buf.extend(chunk)
+                bytes_since_yield += len(chunk)
+                if bytes_since_yield >= READ_YIELD_INTERVAL:
+                    await asyncio.sleep(0)   # send window-update frames to sender
+                    bytes_since_yield = 0
                 if len(buf) >= WRITE_BUF_SIZE:
                     data = bytes(buf)
                     await loop.run_in_executor(None, f.write, data)
@@ -517,8 +533,8 @@ async def start_receiver(
     # Without this, aioquic's default idle_timeout can fire mid-transfer on large files.
     config.idle_timeout = 3600.0
     # Increase flow-control windows so the sender isn't throttled prematurely.
-    config.max_data = 128 * 1024 * 1024          # 128 MB connection window
-    config.max_stream_data = 128 * 1024 * 1024   # 128 MB per-stream window
+    config.max_data = 256 * 1024 * 1024          # 256 MB connection window
+    config.max_stream_data = 256 * 1024 * 1024   # 256 MB per-stream window
     # LAN optimisations (mirror sender config so both sides agree on path characteristics).
     config.initial_rtt = 0.001                    # 1 ms — LAN RTT; avoids 100 ms default
     config.max_datagram_size = 1452               # near-Ethernet-MTU payload

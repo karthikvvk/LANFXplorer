@@ -258,29 +258,31 @@ def calculate_optimal_chunk_size(
     if speed_mbps is None:
         val = get_wifi_speed()
         if val is None:
-            return 16 * 1024 * 1024 #64 * 1024
+            return 4 * 1024 * 1024  # 4 MB fallback for unknown link speed
         speed = float(val)
     else:
         speed = float(speed_mbps)
 
     if speed <= 0.0:
-        return 16 * 1024 * 1024 #64 * 1024  # 64 KB fallback
+        return 4 * 1024 * 1024  # 4 MB fallback
 
-    # Base chunk per speed tier
+    # Base chunk per speed tier — tuned for NVMe + modern NICs.
+    # Larger chunks = fewer syscalls, better sequential I/O throughput.
     if speed <= 50.0:
-        chunk = 256 * 1024              # 256 KB — slow link / USB 2.0 NIC
+        chunk = 512 * 1024              # 512 KB  — slow link / USB 2.0 NIC
     elif speed <= 150.0:
-        chunk = 1 * 1024 * 1024         # 1 MB   — 100 Mbps Ethernet / 802.11n
+        chunk = 4 * 1024 * 1024         # 4 MB    — 100 Mbps Ethernet / 802.11ac
     elif speed <= 500.0:
-        chunk = 4 * 1024 * 1024         # 4 MB   — Gigabit / 802.11ac
+        chunk = 8 * 1024 * 1024         # 8 MB    — Gigabit / 802.11ax
     elif speed <= 2500.0:
-        chunk = 8 * 1024 * 1024         # 8 MB   — 2.5 GbE
+        chunk = 16 * 1024 * 1024        # 16 MB   — 2.5 GbE
     else:
-        chunk = 16 * 1024 * 1024        # 16 MB  — 10 GbE+
+        chunk = 32 * 1024 * 1024        # 32 MB   — 10 GbE+
 
-    # Large-file boost: double the chunk for files > 500 MB
+    # Large-file boost for files > 500 MB: triple chunk, capped at 64 MB.
+    # NVMe sequential reads benefit enormously from large I/O sizes.
     if file_size_bytes and file_size_bytes > 500 * 1024 * 1024:
-        chunk = chunk * 2
+        chunk = min(chunk * 3, 64 * 1024 * 1024)
 
     return chunk
 
