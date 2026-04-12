@@ -113,6 +113,13 @@ async def quic_connect(
     config.idle_timeout = 3600.0               # 1 hour — large files take time
     config.max_data = 128 * 1024 * 1024        # 128 MB connection window
     config.max_stream_data = 128 * 1024 * 1024 # 128 MB per-stream window
+    # LAN optimisations: correct the RTT estimate immediately so QUIC slow-start
+    # grows the congestion window at LAN speed (~0.3 ms RTT), not at the default
+    # aioquic estimate of 100 ms which is designed for internet paths.
+    config.initial_rtt = 0.001                 # 1 ms — LAN RTT; congestion window ramps in <10 ms
+    # Use near-Ethernet-MTU payload: reduces packet count and per-packet Python
+    # overhead (crypto + framing + syscall) by ~10% vs the default 1350-byte limit.
+    config.max_datagram_size = 1452            # 1500 MTU − 20 IP − 8 UDP = 1472 − ~20 QUIC hdr
 
     if ca_cert:
         config.load_verify_locations(cafile=ca_cert)
@@ -196,6 +203,14 @@ async def send_file(connection: QuicSenderConnection, file_path: str) -> None:
     # --- Data stream ---
     _, data_writer = await connection.protocol.create_stream()
     chunk_size = calculate_optimal_chunk_size(file_size_bytes=filesize)
+    # How often to yield the event loop back to aioquic while reading the file.
+    # Without periodic yields, the asyncio event loop never runs during the read
+    # loop: aioquic can't send packets, can't process incoming ACKs, and the
+    # congestion window never grows — which is why single-drain-at-end was still slow.
+    # FLUSH_INTERVAL: flush the aioquic send buffer every N bytes so the network
+    # pipe stays full while we continue reading the next chunk from disk.
+    FLUSH_INTERVAL = 8 * 1024 * 1024   # yield every 8 MB queued
+    buffered = 0
 
     with open(abs_path, "rb") as f:
         while True:
@@ -203,10 +218,16 @@ async def send_file(connection: QuicSenderConnection, file_path: str) -> None:
             if not chunk:
                 break
             data_writer.write(chunk)
-            await data_writer.drain()  # drain per-chunk so QUIC flow control is respected
+            buffered += len(chunk)
+            if buffered >= FLUSH_INTERVAL:
+                # Yield once so aioquic can flush queued packets to the OS and
+                # process any incoming ACKs / flow-control updates from receiver.
+                await asyncio.sleep(0)
+                buffered = 0
 
     data_writer.write_eof()
-    await asyncio.sleep(0)  # yield so QUIC can flush
+    await data_writer.drain()  # final drain — let aioquic finish sending the tail
+    await asyncio.sleep(0)     # extra yield so EOF reaches the peer
 
     # Final ack: scale timeout with file size.
     # Assume minimum 5 MB/s throughput; add 120 s for disk-write overhead.
@@ -281,6 +302,8 @@ async def send_file_with_progress(
     _, data_writer = await connection.protocol.create_stream()
     chunk_size = calculate_optimal_chunk_size(file_size_bytes=filesize)
     bytes_sent = 0
+    FLUSH_INTERVAL = 8 * 1024 * 1024   # yield every 8 MB queued
+    buffered = 0
 
     with open(abs_path, "rb") as f:
         while True:
@@ -288,17 +311,27 @@ async def send_file_with_progress(
             if not chunk:
                 break
             data_writer.write(chunk)
-            await data_writer.drain()
+            buffered += len(chunk)
             bytes_sent += len(chunk)
             if on_progress:
                 try:
                     on_progress(bytes_sent)
                 except Exception:
                     pass
+            if buffered >= FLUSH_INTERVAL:
+                # Yield to the event loop so aioquic can:
+                # 1. Flush queued stream data into UDP packets
+                # 2. Process incoming ACKs from the receiver
+                # 3. Advance the congestion window
+                # Without this yield, the entire event loop is blocked by the
+                # synchronous file-read loop and nothing is actually sent over
+                # the wire until all data has been buffered in memory.
+                await asyncio.sleep(0)
+                buffered = 0
 
-    await data_writer.drain()
     data_writer.write_eof()
-    await asyncio.sleep(0)  # yield so QUIC can flush
+    await data_writer.drain()  # final drain — let aioquic finish sending the tail
+    await asyncio.sleep(0)     # extra yield so EOF reaches the peer
 
     # Final ack: scale timeout with file size.
     # Assume minimum 5 MB/s throughput; add 120 s for disk-write overhead.

@@ -386,15 +386,28 @@ async def _handle_data_stream(
         # sender and eventually cause an idle-timeout connection drop.
         loop = asyncio.get_running_loop()
         f = await loop.run_in_executor(None, lambda: open(path, "wb"))
+        # Write buffer: accumulate up to WRITE_BUF_SIZE bytes before flushing
+        # to the thread pool.  This cuts context-switch overhead from O(chunks)
+        # to O(file_size / WRITE_BUF_SIZE) without blocking the event loop.
+        WRITE_BUF_SIZE = 64 * 1024 * 1024  # 64 MB
+        buf = bytearray()
         try:
             while True:
                 chunk = await reader.read(chunk_size)
                 if not chunk:
+                    # Flush remaining buffer
+                    if buf:
+                        data = bytes(buf)
+                        await loop.run_in_executor(None, f.write, data)
+                        bytes_written += len(data)
+                        buf.clear()
                     break
-                # f.write is synchronous; run it in the thread-pool so the
-                # event loop stays free to process incoming QUIC packets.
-                await loop.run_in_executor(None, f.write, chunk)
-                bytes_written += len(chunk)
+                buf.extend(chunk)
+                if len(buf) >= WRITE_BUF_SIZE:
+                    data = bytes(buf)
+                    await loop.run_in_executor(None, f.write, data)
+                    bytes_written += len(data)
+                    buf.clear()
         finally:
             await loop.run_in_executor(None, f.close)
 
@@ -448,13 +461,24 @@ async def _drain_data_inline(reader, path, filesize, chunk_size,
         bytes_written = 0
         loop = asyncio.get_running_loop()
         f = await loop.run_in_executor(None, lambda: open(path, "wb"))
+        WRITE_BUF_SIZE = 64 * 1024 * 1024  # 64 MB write buffer
+        buf = bytearray()
         try:
             while True:
                 chunk = await reader.read(chunk_size)
                 if not chunk:
+                    if buf:
+                        data = bytes(buf)
+                        await loop.run_in_executor(None, f.write, data)
+                        bytes_written += len(data)
+                        buf.clear()
                     break
-                await loop.run_in_executor(None, f.write, chunk)
-                bytes_written += len(chunk)
+                buf.extend(chunk)
+                if len(buf) >= WRITE_BUF_SIZE:
+                    data = bytes(buf)
+                    await loop.run_in_executor(None, f.write, data)
+                    bytes_written += len(data)
+                    buf.clear()
         finally:
             await loop.run_in_executor(None, f.close)
         print(f"[receiver] ✓ File saved (inline): {path} ({bytes_written} bytes)")
@@ -495,6 +519,9 @@ async def start_receiver(
     # Increase flow-control windows so the sender isn't throttled prematurely.
     config.max_data = 128 * 1024 * 1024          # 128 MB connection window
     config.max_stream_data = 128 * 1024 * 1024   # 128 MB per-stream window
+    # LAN optimisations (mirror sender config so both sides agree on path characteristics).
+    config.initial_rtt = 0.001                    # 1 ms — LAN RTT; avoids 100 ms default
+    config.max_datagram_size = 1452               # near-Ethernet-MTU payload
 
     if ca_cert:
         config.load_verify_locations(cafile=ca_cert)

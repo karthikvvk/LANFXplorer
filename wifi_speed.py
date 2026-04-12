@@ -31,7 +31,7 @@ def get_linux_link_speed():
     """Get link speed on Linux — Ethernet first, WiFi fallback."""
     import glob
     import os as _os
-
+    print("wifispeed")
     SKIP_PREFIXES = ("lo", "veth", "docker", "br-", "virbr", "vmnet", "cni", "tun", "tap")
     WIFI_PREFIXES = ("wlan", "wlp", "wl")
 
@@ -49,6 +49,7 @@ def get_linux_link_speed():
 
             # Interface must be operationally up (some USB NICs report "unknown")
             operstate_path = _os.path.join(sys_path, "operstate")
+            print(operstate_path, "operstate")
             try:
                 with open(operstate_path) as f:
                     state = f.read().strip()
@@ -62,6 +63,7 @@ def get_linux_link_speed():
                 try:
                     with open(speed_path) as f:
                         val = int(f.read().strip())
+                        print(f"[wifi_speed] {iface}: {val} Mbps detected")
                     if val <= 0:
                         continue
 
@@ -84,16 +86,20 @@ def get_linux_link_speed():
                                 timeout=5,
                             )
                             _time.sleep(1.5)
-                            with open(speed_path) as f2:
-                                new_val = int(f2.read().strip())
-                            if new_val > val:
-                                print(f"[wifi_speed] {iface}: renegotiated "
-                                      f"to {new_val} Mbps")
-                                val = new_val
-                            else:
-                                print(f"[wifi_speed] {iface}: still {val} Mbps "
-                                      f"after renegotiation (adapter may "
-                                      f"not support forced speed)")
+                            t = 10
+                            while t > 0:
+                                with open(speed_path) as f2:
+                                    new_val = int(f2.read().strip())
+                                if new_val > val:
+                                    print(f"[wifi_speed] {iface}: renegotiated "
+                                        f"to {new_val} Mbps")
+                                    val = new_val
+                                else:
+                                    print(f"[wifi_speed] {iface}: still {val} Mbps "
+                                        f"after renegotiation (adapter may "
+                                        f"not support forced speed)")
+                                t -= 1
+                                _time.sleep(1)
                         except Exception as rn_err:
                             print(f"[wifi_speed] {iface}: renegotiation "
                                   f"skipped ({rn_err})")
@@ -252,30 +258,29 @@ def calculate_optimal_chunk_size(
     if speed_mbps is None:
         val = get_wifi_speed()
         if val is None:
-            return 64 * 1024
+            return 16 * 1024 * 1024 #64 * 1024
         speed = float(val)
     else:
         speed = float(speed_mbps)
 
     if speed <= 0.0:
-        return 64 * 1024  # 64 KB fallback
+        return 16 * 1024 * 1024 #64 * 1024  # 64 KB fallback
 
     # Base chunk per speed tier
     if speed <= 50.0:
-        chunk = 256 * 1024          # 256 KB — slow link / USB 2.0 NIC
+        chunk = 256 * 1024              # 256 KB — slow link / USB 2.0 NIC
     elif speed <= 150.0:
-        chunk = 1 * 1024 * 1024     # 1 MB   — 100 Mbps Ethernet / 802.11n
+        chunk = 1 * 1024 * 1024         # 1 MB   — 100 Mbps Ethernet / 802.11n
     elif speed <= 500.0:
-        chunk = 4 * 1024 * 1024     # 4 MB   — Gigabit / 802.11ac
+        chunk = 4 * 1024 * 1024         # 4 MB   — Gigabit / 802.11ac
     elif speed <= 2500.0:
-        chunk = 8 * 1024 * 1024     # 8 MB   — 2.5 GbE
+        chunk = 8 * 1024 * 1024         # 8 MB   — 2.5 GbE
     else:
-        chunk = 16 * 1024 * 1024    # 16 MB  — 10 GbE+
+        chunk = 16 * 1024 * 1024        # 16 MB  — 10 GbE+
 
-    # Large-file boost: double the chunk, but cap relative to the tier max
-    # Use the tier's own ceiling, not a global 4 MB cap that undercuts fast links
+    # Large-file boost: double the chunk for files > 500 MB
     if file_size_bytes and file_size_bytes > 500 * 1024 * 1024:
-        chunk = chunk * 2           # no artificial global cap
+        chunk = chunk * 2
 
     return chunk
 

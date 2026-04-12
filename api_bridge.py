@@ -18,7 +18,7 @@ sys.path.insert(0, str(APP_DIR))
 # Now import local modules - using AppConfig for centralized configuration
 from app_config import get_config, AppConfig
 from startsetup import load_env_vars  # Keep for backward compatibility
-from scanner import gethostlist, start_peer_discovery_listener
+from scanner import gethostlist
 from sender_api_functions import quic_connect, send_file as quic_send_file, close_connection
 from pki.store import PeerStore
 from pki.utils import fingerprint_pem, load_cert_pem
@@ -893,7 +893,6 @@ def handshake():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-
 @app.route('/check_password', methods=['GET'])
 def check_password():
     """Check if a password is configured in the keyring."""
@@ -1118,10 +1117,10 @@ def fix_firewall():
 
 
 if __name__ == "__main__":
-    start_peer_discovery()
+    # start_peer_discovery()
     app.run(
         host="0.0.0.0",
         port=5000,
         debug=True,
-        # use_reloader=False
+        use_reloader=False
     )

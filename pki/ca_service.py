@@ -46,9 +46,14 @@ class CADiscoveryProtocol(asyncio.DatagramProtocol):
         if self.transport and not self.transport.is_closing():
             try:
                 config = AppConfig()
+                # Use the host IP as source so the broadcast forces egress on the
+                # correct interface.  On Linux we send to the subnet broadcast;
+                # the kernel picks the interface based on the socket's local address
+                # (which the OS derives from the routing table for 0.0.0.0 binds,
+                # but SO_BROADCAST + explicit target still routes correctly).
                 target_broadcast = config.broadcast or '<broadcast>'
                 self.transport.sendto(DISCOVERY_MSG, (target_broadcast, DISCOVERY_PORT))
-                print(f"[CA discovery] WHO_IS_CA → {target_broadcast}:{DISCOVERY_PORT}")
+                print(f"[CA discovery] WHO_IS_CA → {target_broadcast}:{DISCOVERY_PORT} (via {self.ca_manager.host})")
             except Exception as e:
                 print(f"[CA discovery] Broadcast failed: {e}")
             # Reschedule every 2 seconds (use running loop, not deprecated get_event_loop)
@@ -131,30 +136,54 @@ class CAManager:
 
 
     async def start_discovery(self):
+        """
+        Start CA discovery UDP socket.
+
+        On Linux with both WiFi and Ethernet on the same subnet (same broadcast),
+        we use SO_BINDTODEVICE to lock the socket to the Ethernet interface so
+        that WHO_IS_CA broadcasts exit via eth, not wlan0 (the default-route iface).
+        On Windows we fall back to a plain 0.0.0.0 bind (SO_BINDTODEVICE is Linux-only).
+        """
         import platform
         import socket as _socket
+        from app_config import get_config as _get_config
 
         loop = asyncio.get_running_loop()
 
-        if platform.system().lower() == "windows":
-            # reuse_port is Linux-only — use SO_REUSEADDR via a manual socket instead
-            sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
-            sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
-            sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_BROADCAST, 1)
-            sock.bind(('0.0.0.0', DISCOVERY_PORT))
-            self.discovery_transport, _ = await loop.create_datagram_endpoint(
-                lambda: CADiscoveryProtocol(self.is_ca, self),
-                sock=sock,
-            )
-        else:
-            self.discovery_transport, _ = await loop.create_datagram_endpoint(
-                lambda: CADiscoveryProtocol(self.is_ca, self),
-                local_addr=('0.0.0.0', DISCOVERY_PORT),
-                allow_broadcast=True,
-                reuse_port=True,
-            )
+        sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+        sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+        sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_BROADCAST, 1)
 
-        logger.info(f"Discovery started on port {DISCOVERY_PORT}")
+        if platform.system().lower() != "windows":
+            try:
+                sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEPORT, 1)
+            except (AttributeError, OSError):
+                pass
+            # SO_BINDTODEVICE forces all sends (including broadcast) out the named
+            # interface — this is the definitive fix for multi-homed same-subnet setups.
+            try:
+                cfg = _get_config()
+                iface = cfg.interface  # e.g. "enp0s13f0u1"
+                if iface:
+                    sock.setsockopt(
+                        _socket.SOL_SOCKET,
+                        _socket.SO_BINDTODEVICE,
+                        (iface + '\0').encode()
+                    )
+                    logger.info(f"CA discovery socket bound to device {iface}")
+                    print(f"[CA discovery] Locked to interface {iface} via SO_BINDTODEVICE")
+            except (AttributeError, OSError, PermissionError) as e:
+                # SO_BINDTODEVICE requires CAP_NET_RAW on some kernels; gracefully degrade.
+                print(f"[CA discovery] SO_BINDTODEVICE unavailable ({e}), falling back to 0.0.0.0")
+
+        sock.bind(('0.0.0.0', DISCOVERY_PORT))
+
+        self.discovery_transport, _ = await loop.create_datagram_endpoint(
+            lambda: CADiscoveryProtocol(self.is_ca, self),
+            sock=sock,
+        )
+
+        logger.info(f"Discovery started on port {DISCOVERY_PORT} (host={self.host})")
 
 
 

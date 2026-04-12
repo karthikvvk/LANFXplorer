@@ -2,13 +2,18 @@
 LANFXplorer Static IP Assignment — Simple Ping-Scan
 
 Fallback for direct-cable Ethernet P2P: assigns a unique static IP by
-ping-scanning the 192.168.0.x/24 subnet and picking the first IP that
+ping-scanning the 5.10.0.x/24 subnet and picking the first IP that
 nobody responds to.
+
+Why 5.10.0.0/24?
+  Home/campus routers always use 192.168.x.x or 172.x.x.x.  Using 5.10.0.x
+  puts the Ethernet P2P link on a completely separate subnet, eliminating
+  broadcast collisions when both WiFi and Ethernet are up simultaneously.
 
 Flow:
   1. Guard: only runs for Ethernet interfaces (eth/enp/ens/en), NOT wlan/wl.
   2. Bring interface up with a temp IP so we can ping the subnet.
-  3. Ping 192.168.0.2, .3, .4 … in order — first non-responding IP is taken.
+  3. Ping 5.10.0.2, .3, .4 … in order — first non-responding IP is taken.
   4. First free IP → assign it permanently.
 
 Called automatically by startsetup.py when no network IP is detected.
@@ -23,16 +28,17 @@ from app_config import get_config, reload_config
 
 
 # ─── Constants ──────────────────────────────────────────────────────
-GATEWAY     = "192.168.0.1"
+# Using 5.10.0.0/24 instead of 192.168.0.0/24 so the Ethernet P2P link
+# never shares a broadcast domain with home/campus WiFi routers.
+GATEWAY     = "5.10.0.1"
 CIDR        = "24"
 SUBNET_MASK = "255.255.255.0"
-BROADCAST   = "192.168.0.255"
-# NOTE: TEMP_IP is in the 192.168.224.x subnet — a completely different range from
-# the 192.168.0.x range we assign into.  This ensures the temp address never
-# appears as a "free" candidate and cannot conflict with the peer's scan.
-TEMP_IP     = "192.168.0.223"       # used only to bring the link up
+BROADCAST   = "5.10.0.255"
+# TEMP_IP is used only during the ping-scan phase (bring up → ping → tear down).
+# It must be in the SAME subnet as the target range so pings reach peers.
+TEMP_IP     = "5.10.0.254"          # used only to bring the link up (last address)
 TEMP_CIDR   = "24"                    # /24 for the temp subnet
-IP_RANGE    = range(2, 255)            # .2 through .254
+IP_RANGE    = range(2, 254)            # .2 through .253 (.254 reserved for TEMP_IP)
 
 
 # ─── Helpers ────────────────────────────────────────────────────────
@@ -78,8 +84,8 @@ def _find_free_ip(system_type: str) -> str | None:
     A concurrent/random scan would cause both peers to race and both claim .2.
     """
     for i in IP_RANGE:
-        ip = f"192.168.0.{i}"
-        if ip == TEMP_IP:          # skip the temp address (different subnet anyway)
+        ip = f"5.10.0.{i}"
+        if ip == TEMP_IP:          # skip the temp address
             continue
         alive = _ping_ok(ip, system_type)
         print(f"[static-ip]   ping {ip} → {'alive (skip)' if alive else 'free  ✓'}")
@@ -124,8 +130,8 @@ def _configure_linux(adapter, ip):
     Why nmcli instead of raw `ip addr`:
       - NM profiles survive reboots and cable reconnects (autoconnect=yes).
       - No gateway / DNS is set → existing internet routes are untouched.
-      - Route 192.168.0.0/24 is scoped only to this interface, keeping P2P
-        traffic off the default route.
+      - Route 5.10.0.0/24 is scoped only to this interface, keeping P2P
+        traffic off the default route and fully isolated from WiFi.
       - Idempotent: the old "p2p-link" profile is deleted first, so re-running
         always produces a clean, correct state.
 
@@ -156,7 +162,7 @@ def _configure_linux(adapter, ip):
         f"ipv4.method manual "
         f"ipv4.addresses {ip}/{CIDR} "
         f"ipv4.gateway \"\" "
-        f"ipv4.routes \"192.168.0.0/24\" "
+        f"ipv4.routes \"5.10.0.0/24\" "
         f"ipv4.dns \"\" "
         f"ipv6.method disabled "
         f"connection.autoconnect yes"
@@ -191,7 +197,7 @@ def assign_static_ip(interface_override=None):
     """
     Assign a static IP on an Ethernet interface that has no address.
 
-    Ping-scans 192.168.0.2–254 and takes the first IP nobody replies to.
+    Ping-scans 5.10.0.2–253 and takes the first IP nobody replies to.
     Only works for Ethernet (eth/enp/ens/en) — silently skips WLAN.
 
     Returns the assigned IP string, or None on failure / skip.
@@ -211,7 +217,7 @@ def assign_static_ip(interface_override=None):
 
     print(f"[static-ip] Interface : {iface}")
     print(f"[static-ip] Gateway   : {GATEWAY}")
-    print(f"[static-ip] Subnet    : 192.168.0.0/{CIDR}")
+    print(f"[static-ip] Subnet    : 5.10.0.0/{CIDR}")
 
     # Step 1: bring up the interface with a temp IP
     print(f"[static-ip] Bringing up {iface} with temp IP {TEMP_IP}/{CIDR}")
@@ -236,7 +242,7 @@ def assign_static_ip(interface_override=None):
     free_ip = _find_free_ip(system_type)
 
     if not free_ip:
-        print("[static-ip] All IPs in 192.168.0.2–254 responded — none free!")
+        print("[static-ip] All IPs in 5.10.0.2–253 responded — none free!")
         return None
 
     # Step 3: configure the chosen IP

@@ -195,15 +195,26 @@ def probe_peer(ip: str, timeout: float = 2.0) -> Optional[str]:
     """
     Send a WHO_IS_PEER UDP message to a single IP and wait for I_AM_PEER response.
     Returns the peer's reported IP if it responds, None otherwise.
+
+    IMPORTANT: Binds the socket to the configured host IP so that when both WiFi
+    and Ethernet are up on the same subnet, the packet goes out via the correct
+    (Ethernet) interface instead of the kernel choosing wlan0 (default route).
     """
     config = AppConfig()
     DISCOVERY_PORT = config.PEER_DISCOVERY_PORT
     PEER_DISCOVERY_MSG = config.PEER_DISCOVERY_MSG
     PEER_RESPONSE_PREFIX = config.PEER_RESPONSE_PREFIX
+    # Bind to the specific interface IP so egress is forced on the correct iface.
+    bind_ip = get_config().host or ''
 
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.settimeout(timeout)
+        if bind_ip:
+            try:
+                sock.bind((bind_ip, 0))  # 0 = ephemeral port
+            except Exception as e:
+                print(f"[probe_peer] Bind to {bind_ip} failed: {e} — continuing unbound", file=sys.stderr)
 
         sock.sendto(PEER_DISCOVERY_MSG, (ip, DISCOVERY_PORT))
 
@@ -216,8 +227,8 @@ def probe_peer(ip: str, timeout: float = 2.0) -> Optional[str]:
                 return addr[0]
         except socket.timeout:
             return None
-
-        sock.close()
+        finally:
+            sock.close()
     except Exception:
         return None
 
@@ -365,23 +376,34 @@ def gethostlist() -> List[Dict]:
 # ==================== UDP BROADCAST SCAN (kept as utility) ====================
 
 def scan_peers_udp(network=None) -> List[str]:
-    """Scan for peers using UDP broadcast. Used as a supplementary method."""
-    config = AppConfig()
-    DISCOVERY_PORT = config.PEER_DISCOVERY_PORT
-    PEER_DISCOVERY_MSG = config.PEER_DISCOVERY_MSG
-    PEER_RESPONSE_PREFIX = config.PEER_RESPONSE_PREFIX
-    target_broadcast = config.broadcast or '<broadcast>'
+    """Scan for peers using UDP broadcast. Used as a supplementary method.
+
+    Binds to the configured host IP so the broadcast packet exits on the correct
+    interface when WiFi and Ethernet coexist on the same subnet.
+    """
+    cfg = get_config()
+    DISCOVERY_PORT = AppConfig.PEER_DISCOVERY_PORT
+    PEER_DISCOVERY_MSG = AppConfig.PEER_DISCOVERY_MSG
+    PEER_RESPONSE_PREFIX = AppConfig.PEER_RESPONSE_PREFIX
+    target_broadcast = cfg.broadcast or '<broadcast>'
+    bind_ip = cfg.host or ''
 
     found = set()
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         sock.settimeout(2.0)
+        # Bind to specific interface IP so broadcast exits on the correct iface.
+        if bind_ip:
+            try:
+                sock.bind((bind_ip, 0))
+            except Exception as e:
+                print(f"[scan_peers_udp] Bind to {bind_ip} failed: {e} — trying unbound", file=sys.stderr)
 
         try:
             sock.sendto(PEER_DISCOVERY_MSG, (target_broadcast, DISCOVERY_PORT))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[scan_peers_udp] Broadcast send failed: {e}", file=sys.stderr)
 
         start_time = time.time()
         while time.time() - start_time < 2.0:
@@ -437,27 +459,48 @@ class PeerDiscoveryListener:
 
 
     async def start(self):
+        """
+        Start the listener.
+
+        On Linux with both WiFi and Ethernet on the same subnet, we use
+        SO_BINDTODEVICE to lock the socket to the configured interface so that
+        I_AM_PEER replies go out via eth, not wlan0 (the default-route iface).
+        Falls back gracefully if the capability is unavailable.
+        """
         import platform
         import socket as _socket
         loop = asyncio.get_running_loop()
 
-        if platform.system().lower() == "windows":
-            sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
-            sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
-            sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_BROADCAST, 1)
-            sock.bind(('0.0.0.0', self.DISCOVERY_PORT))
-            self.transport, self.protocol = await loop.create_datagram_endpoint(
-                lambda: self.Protocol(self.host_ip),
-                sock=sock,
-            )
-        else:
-            self.transport, self.protocol = await loop.create_datagram_endpoint(
-                lambda: self.Protocol(self.host_ip),
-                local_addr=('0.0.0.0', self.DISCOVERY_PORT),
-                allow_broadcast=True,
-                reuse_port=True,
-            )
-        print(f"[+] Peer Discovery Listener started on port {self.DISCOVERY_PORT}")
+        sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+        sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+        sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_BROADCAST, 1)
+        if platform.system().lower() != "windows":
+            try:
+                sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEPORT, 1)
+            except (AttributeError, OSError):
+                pass
+            # Lock socket to the configured network interface so replies exit
+            # via the correct (Ethernet) interface, not wlan0.
+            try:
+                cfg = get_config()
+                iface = cfg.interface  # e.g. "enp0s13f0u1"
+                if iface:
+                    sock.setsockopt(
+                        _socket.SOL_SOCKET,
+                        _socket.SO_BINDTODEVICE,
+                        (iface + '\0').encode()
+                    )
+                    print(f"[+] Peer Discovery: SO_BINDTODEVICE → {iface}")
+            except (AttributeError, OSError, PermissionError) as e:
+                print(f"[!] Peer Discovery: SO_BINDTODEVICE unavailable ({e}), using 0.0.0.0")
+
+        sock.bind(('0.0.0.0', self.DISCOVERY_PORT))
+
+        self.transport, self.protocol = await loop.create_datagram_endpoint(
+            lambda: self.Protocol(self.host_ip),
+            sock=sock,
+        )
+        print(f"[+] Peer Discovery Listener started on UDP {self.DISCOVERY_PORT} (responding as {self.host_ip})")
 
 
 

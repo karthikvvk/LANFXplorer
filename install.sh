@@ -237,6 +237,32 @@ echo "[+] Configuring firewall rules for LANFXplorer..."
 }
 
 # ===============================
+# Sudoers rule — passwordless ip addr
+# ===============================
+# LANFXplorer needs to apply static IP addresses to the Ethernet interface
+# at startup (via `ip addr replace/del`) without prompting for a password.
+# This is required when `nmcli con modify` updates a stored profile but
+# `nmcli con up` was never completed (e.g. no peer connected at modify-time).
+# The rule is scoped to `/usr/sbin/ip addr *` only — not all of sudo.
+if [ -d /etc/sudoers.d ]; then
+  SUDOERS_FILE="/etc/sudoers.d/lanfxplorer-ip"
+  CURRENT_USER="$(whoami)"
+  SUDOERS_RULE="$CURRENT_USER ALL=(ALL) NOPASSWD: /usr/sbin/ip addr *"
+
+  if [ -f "$SUDOERS_FILE" ] && grep -qF "$SUDOERS_RULE" "$SUDOERS_FILE" 2>/dev/null; then
+    echo "[✓] Sudoers rule already present ($SUDOERS_FILE)"
+  else
+    echo "[+] Adding passwordless sudoers rule for 'ip addr' (user: $CURRENT_USER)..."
+    echo "$SUDOERS_RULE" | sudo tee "$SUDOERS_FILE" > /dev/null
+    sudo chmod 440 "$SUDOERS_FILE"
+    echo "[✓] Sudoers rule added: $SUDOERS_FILE"
+  fi
+else
+  echo "[!] /etc/sudoers.d not found — skipping ip addr sudoers rule (non-Linux?)"
+fi
+
+
+# ===============================
 # Runtime directories
 # ===============================
 mkdir -p "$APP_DIR/data" "$APP_DIR/logs"
@@ -273,4 +299,4 @@ echo "[✓] Installation complete"
 
 
 chmod +x app.sh
-./app.sh
+$(pwd)/app.sh

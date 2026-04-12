@@ -19,7 +19,7 @@ pwd = os.getcwd()
 user = getpass.getuser()
 # NOTE: Using 'system_type' instead of 'sys' to avoid overwriting the sys module
 system_type = platform.system().lower()
-
+password = ""
 interface = None
 ethernet_interface = None   # best wired Ethernet iface detected (if any)
 wifi_interface = None        # best WiFi iface detected (if any)
@@ -150,8 +150,59 @@ def _check_p2p_connection():
     return "missing"
 
 
+def _get_profile_ip(profile_name: str = "p2p-link"):
+    """
+    Read the IP address stored in the NM connection profile (NOT the live
+    interface IP).  Returns (ip_str, cidr_str) or (None, None).
+
+    This is different from _get_iface_ip() which reads the running kernel state.
+    They can differ after `nmcli con modify` without a subsequent `nmcli con up`.
+    """
+    try:
+        out = subprocess.check_output(
+            ["nmcli", "-t", "-f", "ipv4.addresses", "con", "show", profile_name],
+            text=True, stderr=subprocess.DEVNULL
+        )
+        # Output format:  ipv4.addresses:5.10.0.50/24
+        for line in out.splitlines():
+            if line.startswith("ipv4.addresses:"):
+                val = line.split(":", 1)[1].strip()
+                if "/" in val:
+                    ip, cidr = val.split("/", 1)
+                    return ip.strip(), cidr.strip()
+                elif val:
+                    return val.strip(), "24"
+    except Exception:
+        pass
+    return None, None
 
 
+def _force_apply_profile_ip(iface: str, new_ip: str, cidr: str, old_ip: str = None):
+    """
+    Apply *new_ip/cidr* on *iface* immediately using `ip addr` — no NetworkManager
+    round-trip, no peer required.  Removes *old_ip* if provided.
+
+    This bridges the gap between `nmcli con modify` (updates stored profile only)
+    and `nmcli con up` (re-activates, requires the cable peer to be ready).
+    """
+    try:
+        # Add the new address first so the interface stays live during swap
+        subprocess.run(
+            ["sudo", "ip", "addr", "replace", f"{new_ip}/{cidr}", "dev", iface],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        # Remove the old address if it differs
+        if old_ip and old_ip != new_ip:
+            subprocess.run(
+                ["sudo", "ip", "addr", "del", f"{old_ip}/{cidr}", "dev", iface],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+        print(f"[+] Applied profile IP {new_ip}/{cidr} on {iface} (via ip addr replace)")
+    except Exception as e:
+        print(f"[!] Could not apply profile IP: {e}")
+
+
+def get_network_info():
     global host_ip, cidr, interface, system_type, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
 
 
@@ -223,7 +274,7 @@ def _check_p2p_connection():
 
 def load_env_vars():
 
-    global host_ip, cidr, interface, system_type, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
+    global host_ip, cidr, interface, system_type, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert, password
 
     # Reload .env → os.environ via AppConfig (no dotenv needed)
     cfg = get_config()
@@ -275,7 +326,7 @@ def load_env_vars():
     }
 
 def write_env(installer=False):
-    global host_ip, cidr, interface, ethernet_interface, wifi_interface, system_type, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
+    global host_ip, cidr, interface, ethernet_interface, wifi_interface, system_type, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert,password
     detect_interface()
     ls = os.listdir(pwd)
     if "key.pem" not in ls or "cert.pem" not in ls:
@@ -328,8 +379,23 @@ def write_env(installer=False):
         eth_ip,  eth_cidr = None, "24"
 
         if p2p_status == "active":
-            # Profile is running — grab the IP it assigned
+            # Profile is running — grab the LIVE IP from the interface.
             eth_ip, eth_cidr = _get_iface_ip(ethernet_interface)
+
+            # IMPORTANT: Also read the STORED profile IP.  If they differ it means
+            # `nmcli con modify` was run but `nmcli con up` was never completed
+            # (e.g. it was killed because no peer was connected at the time).
+            # In that case, force-apply the profile IP immediately via `ip addr`
+            # so the app starts with the correct intended address.
+            profile_ip, profile_cidr = _get_profile_ip("p2p-link")
+            if profile_ip and eth_ip and profile_ip != eth_ip:
+                print(f"[!] Profile IP ({profile_ip}) ≠ live IP ({eth_ip}) — applying profile IP now...")
+                _force_apply_profile_ip(ethernet_interface, profile_ip,
+                                        profile_cidr or eth_cidr or "24",
+                                        old_ip=eth_ip)
+                eth_ip   = profile_ip
+                eth_cidr = profile_cidr or eth_cidr or "24"
+
             if eth_ip:
                 print(f"[+] p2p-link active — using {eth_ip}")
             else:
@@ -404,6 +470,7 @@ def write_env(installer=False):
         "RECIVHOST": reciv_host,
         "CA_CERT": os.path.join(pwd, "ca_cert.pem"),
         "INSTALLER": "true" if installer else "false",
+        "PASSWORD": password,
     }
 
     # Write all env vars in one call (replaces the set_key loop)
