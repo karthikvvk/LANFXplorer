@@ -370,84 +370,84 @@ def write_env(installer=False):
             with open("cert.pem", "wb") as f:
                 f.write(cert.public_bytes(serialization.Encoding.PEM))
     # ── Network detection: Ethernet / WiFi priority tree ─────────────────────
-    has_eth  = ethernet_interface is not None
+    has_eth  = None #ethernet_interface is not None
     has_wifi = wifi_interface is not None
 
-    if has_eth:
-        interface = ethernet_interface
-        p2p_status = _check_p2p_connection()
-        eth_ip,  eth_cidr = None, "24"
+    # if has_eth:
+    #     interface = ethernet_interface
+    #     p2p_status = _check_p2p_connection()
+    #     eth_ip,  eth_cidr = None, "24"
 
-        if p2p_status == "active":
-            # Profile is running — grab the LIVE IP from the interface.
-            eth_ip, eth_cidr = _get_iface_ip(ethernet_interface)
+    #     if p2p_status == "active":
+    #         # Profile is running — grab the LIVE IP from the interface.
+    #         eth_ip, eth_cidr = _get_iface_ip(ethernet_interface)
 
-            # IMPORTANT: Also read the STORED profile IP.  If they differ it means
-            # `nmcli con modify` was run but `nmcli con up` was never completed
-            # (e.g. it was killed because no peer was connected at the time).
-            # In that case, force-apply the profile IP immediately via `ip addr`
-            # so the app starts with the correct intended address.
-            profile_ip, profile_cidr = _get_profile_ip("p2p-link")
-            if profile_ip and eth_ip and profile_ip != eth_ip:
-                print(f"[!] Profile IP ({profile_ip}) ≠ live IP ({eth_ip}) — applying profile IP now...")
-                _force_apply_profile_ip(ethernet_interface, profile_ip,
-                                        profile_cidr or eth_cidr or "24",
-                                        old_ip=eth_ip)
-                eth_ip   = profile_ip
-                eth_cidr = profile_cidr or eth_cidr or "24"
+    #         # IMPORTANT: Also read the STORED profile IP.  If they differ it means
+    #         # `nmcli con modify` was run but `nmcli con up` was never completed
+    #         # (e.g. it was killed because no peer was connected at the time).
+    #         # In that case, force-apply the profile IP immediately via `ip addr`
+    #         # so the app starts with the correct intended address.
+    #         profile_ip, profile_cidr = _get_profile_ip("p2p-link")
+    #         if profile_ip and eth_ip and profile_ip != eth_ip:
+    #             print(f"[!] Profile IP ({profile_ip}) ≠ live IP ({eth_ip}) — applying profile IP now...")
+    #             _force_apply_profile_ip(ethernet_interface, profile_ip,
+    #                                     profile_cidr or eth_cidr or "24",
+    #                                     old_ip=eth_ip)
+    #             eth_ip   = profile_ip
+    #             eth_cidr = profile_cidr or eth_cidr or "24"
 
-            if eth_ip:
-                print(f"[+] p2p-link active — using {eth_ip}")
-            else:
-                # Activated but IP not visible yet — treat as inactive
-                print("[!] p2p-link active but IP not visible — re-activating...")
-                p2p_status = "inactive"
+    #         if eth_ip:
+    #             print(f"[+] p2p-link active — using {eth_ip}")
+    #         else:
+    #             # Activated but IP not visible yet — treat as inactive
+    #             print("[!] p2p-link active but IP not visible — re-activating...")
+    #             p2p_status = "inactive"
 
-        if p2p_status == "inactive":        # separate `if` allows fall-through from above
-            print("[!] p2p-link exists but is down — bringing it up...")
-            subprocess.run(
-                ["nmcli", "con", "up", "p2p-link"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-            # Poll until the IP appears (up to 10 s)
-            import time as _t
-            deadline = _t.time() + 10
-            while _t.time() < deadline:
-                eth_ip, eth_cidr = _get_iface_ip(ethernet_interface)
-                if eth_ip:
-                    break
-                _t.sleep(0.5)
-            if eth_ip:
-                print(f"[+] p2p-link brought up — using {eth_ip}")
-            else:
-                raise RuntimeError(
-                    f"p2p-link activated but no IP appeared on {ethernet_interface}")
+    #     if p2p_status == "inactive":        # separate `if` allows fall-through from above
+    #         print("[!] p2p-link exists but is down — bringing it up...")
+    #         subprocess.run(
+    #             ["nmcli", "con", "up", "p2p-link"],
+    #             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    #         )
+    #         # Poll until the IP appears (up to 10 s)
+    #         import time as _t
+    #         deadline = _t.time() + 10
+    #         while _t.time() < deadline:
+    #             eth_ip, eth_cidr = _get_iface_ip(ethernet_interface)
+    #             if eth_ip:
+    #                 break
+    #             _t.sleep(0.5)
+    #         if eth_ip:
+    #             print(f"[+] p2p-link brought up — using {eth_ip}")
+    #         else:
+    #             raise RuntimeError(
+    #                 f"p2p-link activated but no IP appeared on {ethernet_interface}")
 
-        elif p2p_status == "missing":
-            # No profile at all — run ping-scan + create nmcli p2p-link
-            if has_wifi:
-                print("[!] No p2p-link (WiFi active) — scanning + creating P2P profile...")
-            else:
-                print("[!] No p2p-link — scanning + creating P2P profile...")
-            from set_static_ip import assign_static_ip
-            chosen = assign_static_ip(interface_override=ethernet_interface)
-            if not chosen:
-                raise RuntimeError("Could not assign a static IP on Ethernet")
-            eth_ip, eth_cidr = chosen, "24"
+    #     elif p2p_status == "missing":
+    #         # No profile at all — run ping-scan + create nmcli p2p-link
+    #         if has_wifi:
+    #             print("[!] No p2p-link (WiFi active) — scanning + creating P2P profile...")
+    #         else:
+    #             print("[!] No p2p-link — scanning + creating P2P profile...")
+    #         from set_static_ip import assign_static_ip
+    #         chosen = assign_static_ip(interface_override=ethernet_interface)
+    #         if not chosen:
+    #             raise RuntimeError("Could not assign a static IP on Ethernet")
+    #         eth_ip, eth_cidr = chosen, "24"
 
-        _fill_network_from_ip(eth_ip, eth_cidr or "24")
-        if has_wifi:
-            print(f"[+] Ethernet + WiFi — P2P on {eth_ip} (WiFi stays active)")
+    #     _fill_network_from_ip(eth_ip, eth_cidr or "24")
+    #     if has_wifi:
+    #         print(f"[+] Ethernet + WiFi — P2P on {eth_ip} (WiFi stays active)")
 
-    elif has_wifi:
-        # ── WiFi only — use existing network config, no static IP needed ──────
-        print("[+] WiFi-only mode — using existing network configuration")
-        get_network_info()
+    # elif has_wifi:
+    #     # ── WiFi only — use existing network config, no static IP needed ──────
+    #     print("[+] WiFi-only mode — using existing network configuration")
+    #     get_network_info()
 
-    else:
-        raise RuntimeError("[-] No network interface found (no Ethernet, no WiFi) — cannot start")
+    # else:
+    #     raise RuntimeError("[-] No network interface found (no Ethernet, no WiFi) — cannot start")
 
-
+    get_network_info()
     # Ensure Lanfxplorer directory exists and use it for OUTDIR/SRCDIR
     secure_root = ensure_lanfxplorer_directory()
     

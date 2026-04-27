@@ -131,18 +131,17 @@ def _create_transfer_task(files: list, remote_host: str, direction: str = "send"
 
 
 def _update_transfer_progress(task_id: str, bytes_sent: int, total_bytes: int):
-    """Update transfer progress based on elapsed time (simulated realistic progress)."""
+    """Update transfer progress using real byte counts (not time estimates).
+    With MsQuic CLI binaries transfers complete far faster than the old
+    aioquic estimate — time-based simulation is always wrong here.
+    """
     with _transfer_lock:
         if task_id in _transfer_tasks:
             task = _transfer_tasks[task_id]
             task["transferred"] = bytes_sent
-            
-            # Calculate progress based on elapsed time vs estimated duration
-            # This gives smoother, more realistic progress
-            if task["estimated_duration"] > 0:
-                elapsed = time.time() - task["start_time"]
-                task["progress"] = min(elapsed / task["estimated_duration"], 0.99)  # Cap at 99% until complete
-            elif total_bytes > 0:
+            if total_bytes > 0:
+                # Real progress: how many bytes have actually been confirmed sent
+                # Cap at 0.99 until _complete_transfer_task sets it to 1.0
                 task["progress"] = min(bytes_sent / total_bytes, 0.99)
 
 
@@ -632,59 +631,77 @@ def transfer_status(task_id):
     with _transfer_lock:
         if task_id in _fetch_task_mapping:
             fetch_info = _fetch_task_mapping[task_id].copy()
-    
+
     # If it's a fetch task, proxy the status request to the remote host
     if fetch_info is not None:
         remote_host = fetch_info["remote_host"]
         remote_task_id = fetch_info["remote_task_id"]
-        print(f"[transfer_status] Proxying status for task {task_id[:8]}... to {remote_host}")
-        
+
         try:
-            # Proxy the status request to the remote host
             proxy_url = f"http://{remote_host}:5000/transfer_status/{remote_task_id}"
-            print(f"[transfer_status] GET {proxy_url}")
             resp = requests.get(proxy_url, timeout=5)
-            
+
             if resp.status_code == 200:
                 remote_status = resp.json()
-                print(f"[transfer_status] Remote status: {remote_status.get('status')}, progress: {remote_status.get('progress')}")
-                # Clean up mapping once transfer is complete or failed
+                # Clean up mapping once transfer is complete or failed —
+                # this stops future proxy calls immediately.
                 if remote_status.get("status") in ("completed", "failed"):
                     with _transfer_lock:
                         _fetch_task_mapping.pop(task_id, None)
-                    print(f"[transfer_status] Task {task_id[:8]}... completed, removed from fetch mapping")
+                    print(
+                        f"[transfer_status] Task {task_id[:8]}... "
+                        f"{remote_status['status']}, fetch mapping removed"
+                    )
                 return jsonify(remote_status), 200
             else:
-                print(f"[transfer_status] Remote returned error: {resp.status_code} - {resp.text}")
-                return jsonify({"status": "error", "message": f"Remote returned {resp.status_code}"}), resp.status_code
+                return jsonify({
+                    "status": "error",
+                    "message": f"Remote returned {resp.status_code}"
+                }), resp.status_code
         except requests.exceptions.RequestException as e:
             print(f"[!] Failed to proxy transfer_status to {remote_host}: {e}")
-            return jsonify({"status": "error", "message": f"Failed to contact remote host: {str(e)}"}), 502
-    
-    # Otherwise, check local tasks
+            return jsonify({
+                "status": "error",
+                "message": f"Failed to contact remote host: {str(e)}"
+            }), 502
+
+    # ── Local task ───────────────────────────────────────────────────────────
     with _transfer_lock:
         if task_id not in _transfer_tasks:
             return jsonify({"status": "error", "message": "Task not found"}), 404
-        
         task = _transfer_tasks[task_id].copy()
-    
-    # Recalculate progress based on elapsed time for in-progress tasks
-    if task["status"] == "in_progress" and task.get("estimated_duration", 0) > 0:
-        elapsed = time.time() - task["start_time"]
-        task["progress"] = min(elapsed / task["estimated_duration"], 0.99)
-    
-    return jsonify({
-        "status": task["status"],
-        "progress": task["progress"],
-        "total_size": task["total_size"],
-        "transferred": task["transferred"],
-        "files": task["files"],
-        "current_file": task.get("current_file"),
-        "error": task["error"],
-        "estimated_duration": task.get("estimated_duration", 0),
-        "elapsed": time.time() - task.get("start_time", time.time()),
-    }), 200
 
+    # ── Failsafe: if the sender thread already marked this completed or failed,
+    # return immediately — do NOT recalculate anything from time estimates.
+    # With MsQuic CLI, send_file_cli() blocks and returns only when the binary
+    # exits, so 'completed' is ground truth: the file is on the remote disk.
+    if task["status"] in ("completed", "failed"):
+        return jsonify({
+            "status":             task["status"],
+            "progress":           task["progress"],
+            "total_size":         task["total_size"],
+            "transferred":        task["transferred"],
+            "files":              task["files"],
+            "current_file":       task.get("current_file"),
+            "error":              task["error"],
+            "estimated_duration": task.get("estimated_duration", 0),
+            "elapsed":            time.time() - task.get("start_time", time.time()),
+        }), 200
+
+    # ── In-progress: use real byte-ratio progress stored by _update_transfer_progress.
+    # Do NOT recalculate from elapsed time — MsQuic is orders of magnitude faster
+    # than the old aioquic estimate, making time-based progress always wrong.
+    return jsonify({
+        "status":             task["status"],
+        "progress":           task["progress"],   # set by _update_transfer_progress (bytes/total)
+        "total_size":         task["total_size"],
+        "transferred":        task["transferred"],
+        "files":              task["files"],
+        "current_file":       task.get("current_file"),
+        "error":              task["error"],
+        "estimated_duration": task.get("estimated_duration", 0),
+        "elapsed":            time.time() - task.get("start_time", time.time()),
+    }), 200
 
 
 @app.route("/receive_files", methods=["POST"])
