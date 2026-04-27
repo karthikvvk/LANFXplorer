@@ -31,6 +31,8 @@ except:
 ITEMS = [
     "analysis_options.yaml",
     "pki",
+    "c_ver",
+    "quic_cli.py",
     "cli_profile.py",
     "logout.py",
     "api_bridge.py",

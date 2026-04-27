@@ -19,7 +19,7 @@ sys.path.insert(0, str(APP_DIR))
 from app_config import get_config, AppConfig
 from startsetup import load_env_vars  # Keep for backward compatibility
 from scanner import gethostlist
-from sender_api_functions import quic_connect, send_file as quic_send_file, close_connection
+from quic_cli import send_file_cli, start_receiver_cli
 from pki.store import PeerStore
 from pki.utils import fingerprint_pem, load_cert_pem
 from path_security import (
@@ -42,6 +42,11 @@ import uuid
 import time
 from threading import Lock
 from wifi_speed import estimate_transfer_time_seconds, get_wifi_speed, calculate_optimal_chunk_size
+
+# Registry of active receiver subprocesses: port -> Popen
+# Used by /prepare_receive to prevent port collisions.
+_active_receivers: dict = {}
+_receiver_lock = Lock()
 
 # ==================== PATH RESTRICTION HELPERS ====================
 # Path security functions imported from path_security module
@@ -513,87 +518,90 @@ def send_files():
     task_id = _create_transfer_task(all_file_paths, remote_host, "send")
     
     def _do_send_background():
-        """Background thread to perform the actual transfer."""
+        """
+        Background thread: coordinate with remote /prepare_receive, then invoke
+        the MsQuic sender binary once per file via quic_cli.send_file_cli().
+        """
         try:
-            client_cert = env.get("CLIENT_CERT")
-            client_key = env.get("CLIENT_KEY")
-            ca_cert = env.get("CA_CERT") or env.get("ca_cert")
-
             print(f"[send_files] Starting background transfer to {remote_host}:{port}")
             print(f"[send_files] Regular files: {valid_files}")
             print(f"[send_files] Folder files: {len(folder_file_map)} files from directories")
             print(f"[send_files] dest_dir: {dest_dir}")
-            print(f"[send_files] CA cert: {ca_cert}")
-            print(f"[send_files] Client cert: {client_cert}")
 
-            if not ca_cert:
-                _complete_transfer_task(task_id, False, "CA_CERT not set")
-                return
+            # Combine regular files and folder files into one flat list with
+            # (abs_path, rel_path_or_None) so we iterate uniformly.
+            all_files = (
+                [(f, None) for f in valid_files] +
+                [(abs_p, rel_p) for abs_p, rel_p in folder_file_map]
+            )
 
-            async def _async_send():
-                from sender_api_functions import send_file_with_progress
-                
-                print(f"[send_files] Connecting to QUIC {remote_host}:{port}...")
-                conn = await quic_connect(
-                    host=remote_host,
-                    port=port,
-                    insecure=False,
-                    server_name=os.environ.get("SERVER_NAME"),
-                    client_cert=client_cert,
-                    client_key=client_key,
-                    ca_cert=ca_cert,
-                )
-                print(f"[send_files] QUIC connection established!")
+            total_size = sum(os.path.getsize(f) for f, _ in all_files if os.path.isfile(f))
+            bytes_sent_total = 0
+
+            for file_path, rel_path in all_files:
+                filename = rel_path if rel_path else os.path.basename(file_path)
+                file_size = os.path.getsize(file_path)
+
+                with _transfer_lock:
+                    if task_id in _transfer_tasks:
+                        _transfer_tasks[task_id]["current_file"] = file_path
+
+                print(f"[send_files] [{time.asctime()}] Preparing remote receiver for: {filename}")
+
+                # ── Step 1: Ask remote peer to start its receiver subprocess ──────
                 try:
-                    # Calculate total size for all files (regular + folder contents)
-                    total_size = sum(os.path.getsize(f) for f in valid_files)
-                    total_size += sum(os.path.getsize(abs_p) for abs_p, _ in folder_file_map)
-                    bytes_sent_total = 0
-                    
-                    # Phase 2a: Send regular files (no relative path override)
-                    for path in valid_files:
-                        print(f"[send_files] Sending file: {path}")
-                        with _transfer_lock:
-                            if task_id in _transfer_tasks:
-                                _transfer_tasks[task_id]["current_file"] = path
-                        
-                        file_size = os.path.getsize(path)
-                        
-                        def on_progress(bytes_sent_file):
-                            nonlocal bytes_sent_total
-                            current_total = bytes_sent_total + bytes_sent_file
-                            _update_transfer_progress(task_id, current_total, total_size)
-                        
-                        await send_file_with_progress(conn, path, on_progress, dest_dir=dest_dir)
-                        bytes_sent_total += file_size
-                        print(f"[send_files] File sent successfully: {path}")
-                    
-                    # Phase 2b: Send folder files with relative path preservation
-                    for abs_path, rel_path in folder_file_map:
-                        print(f"[send_files] [{time.asctime()}] Sending folder file: {abs_path} (rel={rel_path})")
-                        with _transfer_lock:
-                            if task_id in _transfer_tasks:
-                                _transfer_tasks[task_id]["current_file"] = abs_path
-                        
-                        file_size = os.path.getsize(abs_path)
-                        
-                        def on_progress(bytes_sent_file):
-                            nonlocal bytes_sent_total
-                            current_total = bytes_sent_total + bytes_sent_file
-                            _update_transfer_progress(task_id, current_total, total_size)
-                        
-                        await send_file_with_progress(conn, abs_path, on_progress, dest_dir=dest_dir, rel_path=rel_path)
-                        bytes_sent_total += file_size
-                        print(f"[send_files] [{time.asctime()}] Folder file sent successfully: {rel_path}")
-                    
-                    print(f"[send_files] All files sent, marking task complete")
-                    _complete_transfer_task(task_id, True)
-                finally:
-                    await close_connection(conn)
-                    print(f"[send_files] Connection closed")
+                    prep_resp = requests.post(
+                        f"http://{remote_host}:5000/prepare_receive",
+                        json={
+                            "filename": filename,
+                            "filesize": file_size,
+                            "dest_dir": dest_dir,
+                        },
+                        timeout=20,
+                    )
+                except requests.RequestException as e:
+                    raise RuntimeError(f"Could not reach /prepare_receive on {remote_host}: {e}")
 
-            asyncio.run(_async_send())
-            
+                if prep_resp.status_code == 503:
+                    raise RuntimeError(
+                        f"Remote peer busy (port in use). Try again shortly. "
+                        f"Response: {prep_resp.text[:200]}"
+                    )
+                if prep_resp.status_code != 200:
+                    raise RuntimeError(
+                        f"/prepare_receive failed ({prep_resp.status_code}): {prep_resp.text[:200]}"
+                    )
+
+                prep_info   = prep_resp.json()
+                quic_port   = int(prep_info.get("receiver_port", port))
+
+                print(
+                    f"[send_files] Remote receiver ready on port {quic_port} "
+                    f"→ {prep_info.get('save_path', '?')}"
+                )
+
+                # ── Step 2: Brief pause so remote receiver subprocess can bind ────
+                time.sleep(0.5)
+
+                # ── Step 3: Invoke MsQuic sender binary ──────────────────────────
+                print(f"[send_files] [{time.asctime()}] Invoking sender binary for: {file_path}")
+                ok = send_file_cli(
+                    file_path,
+                    remote_host=remote_host,
+                    remote_port=quic_port,
+                )
+                if not ok:
+                    raise RuntimeError(
+                        f"MsQuic sender binary returned non-zero for: {file_path}"
+                    )
+
+                bytes_sent_total += file_size
+                _update_transfer_progress(task_id, bytes_sent_total, total_size)
+                print(f"[send_files] [{time.asctime()}] File sent: {filename}")
+
+            print(f"[send_files] All files sent, marking task complete")
+            _complete_transfer_task(task_id, True)
+
         except Exception as e:
             import traceback
             error_msg = str(e) or f"{type(e).__name__}: (no message)"
@@ -1114,6 +1122,119 @@ def fix_firewall():
     except Exception as e:
         print(f"[!] fix_firewall error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# /prepare_receive — Phase 2: receiver-side coordination endpoint
+# ---------------------------------------------------------------------------
+
+@app.route("/prepare_receive", methods=["POST"])
+def prepare_receive():
+    """
+    Called by the sending peer (via send_files/_do_send_background) before
+    invoking the MsQuic sender binary.  This endpoint:
+      1. Validates and computes the absolute save path from filename + dest_dir.
+      2. Checks the QUIC port is free (no active receiver).
+      3. Spawns c_ver/receiver as a background subprocess writing to that path.
+      4. Returns the port and resolved save_path so the sender knows where to connect.
+
+    Request body:
+        { "filename": "foo.tar.gz",
+          "filesize": 1234567,
+          "dest_dir": "/optional/override/path"  }   # dest_dir may be null
+
+    Response:
+        200  { "status": "ready", "receiver_port": 4433, "save_path": "/abs/path" }
+        400  bad request
+        403  path security violation
+        503  QUIC port already in use by an active transfer
+        500  internal error
+    """
+    data         = request.get_json(silent=True) or {}
+    filename_raw = data.get("filename", "").strip()
+    filesize     = int(data.get("filesize", 0))
+    dest_dir_raw = data.get("dest_dir") or None
+
+    if not filename_raw:
+        return jsonify({"status": "error", "message": "filename is required"}), 400
+
+    # ── Sanitise filename (mirrors receiver_api_functions logic) ──────────────
+    filename = filename_raw.lstrip("/")
+    parts    = filename.replace("\\", "/").split("/")
+    safe_parts = [p for p in parts if p and p != ".."]
+    filename = "/".join(safe_parts) if safe_parts else "unnamed_file"
+
+    # ── Resolve destination directory ─────────────────────────────────────────
+    if dest_dir_raw:
+        is_valid, error_msg = validate_path_access(dest_dir_raw)
+        if not is_valid:
+            print(f"[prepare_receive] SECURITY: Rejected dest_dir: {error_msg}")
+            return jsonify({"status": "error", "message": error_msg}), 403
+        base_dir = dest_dir_raw.replace("\\", "/").rstrip("/")
+    else:
+        base_dir = get_lanfxplorer_root()
+
+    is_valid, error_msg = validate_path_access(base_dir)
+    if not is_valid:
+        return jsonify({"status": "error", "message": error_msg}), 403
+
+    os.makedirs(base_dir, exist_ok=True)
+
+    save_path = os.path.normpath(os.path.abspath(os.path.join(base_dir, filename)))
+    is_valid, error_msg = validate_path_access(save_path)
+    if not is_valid:
+        return jsonify({"status": "error", "message": error_msg}), 403
+
+    parent = os.path.dirname(save_path)
+    os.makedirs(parent, exist_ok=True)
+
+    # ── Port availability check ───────────────────────────────────────────────
+    from app_config import get_config, AppConfig
+    config    = get_config()
+    quic_port = config.port or AppConfig.QUIC_PORT
+
+    with _receiver_lock:
+        # Clean up any receiver processes that have already exited
+        for p in list(_active_receivers.keys()):
+            proc = _active_receivers[p]
+            if proc.poll() is not None:   # process has exited
+                _active_receivers.pop(p, None)
+
+        if quic_port in _active_receivers:
+            return jsonify({
+                "status": "error",
+                "message": f"QUIC port {quic_port} is already in use by an active transfer. Retry shortly."
+            }), 503
+
+        # ── Spawn c_ver/receiver subprocess ──────────────────────────────────
+        print(
+            f"[prepare_receive] Starting receiver for '{filename}' "
+            f"({filesize} bytes) → {save_path}"
+        )
+        try:
+            proc = start_receiver_cli(save_path=save_path, port=quic_port)
+        except Exception as e:
+            print(f"[prepare_receive] Failed to start receiver: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
+
+        _active_receivers[quic_port] = proc
+
+    # Spawn a watcher thread that removes the entry once the receiver exits
+    def _watch_receiver(p, proc):
+        proc.wait()
+        with _receiver_lock:
+            _active_receivers.pop(p, None)
+        print(f"[prepare_receive] Receiver on port {p} exited (returncode={proc.returncode})")
+
+    threading.Thread(
+        target=_watch_receiver, args=(quic_port, proc), daemon=True
+    ).start()
+
+    return jsonify({
+        "status":        "ready",
+        "receiver_port": quic_port,
+        "save_path":     save_path,
+    }), 200
 
 
 if __name__ == "__main__":

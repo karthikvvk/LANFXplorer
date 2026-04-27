@@ -42,6 +42,15 @@ from aioquic.quic.configuration import QuicConfiguration
 from pki.utils import fingerprint_pem, load_cert_pem
 from wifi_speed import calculate_optimal_chunk_size
 
+# Use uvloop for a faster event loop if available (2-3× throughput boost
+# over the default asyncio loop for I/O-bound workloads like QUIC).
+try:
+    import uvloop
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    print("[sender] uvloop enabled")
+except ImportError:
+    pass  # fall back to standard asyncio — still works, just slower
+
 
 # ---------------------------------------------------------------------------
 # Connection wrapper
@@ -202,31 +211,25 @@ async def send_file(connection: QuicSenderConnection, file_path: str) -> None:
 
     # --- Data stream ---
     _, data_writer = await connection.protocol.create_stream()
-    chunk_size = calculate_optimal_chunk_size(file_size_bytes=filesize)
-    # KEY INSIGHT: f.read() is SYNCHRONOUS — it blocks the asyncio event loop
-    # for the entire duration of the disk read.  On NVMe at ~3 GB/s:
-    #   1 MB read  ≈ 0.3 ms ≈ 1 GigE RTT   ← safe, event loop gets CPU quickly
-    #  16 MB read  ≈ 5  ms ≈ 17 GigE RTTs  ← CWND collapses, ACKs pile up
-    # chunk_size (from wifi_speed) is used by the RECEIVER's async reader only.
-    # The sender must use a small, fixed DISK_READ_CHUNK.
-    DISK_READ_CHUNK = 1 * 1024 * 1024   # 1 MB per blocking disk read
-    # After accumulating FLUSH_INTERVAL bytes, yield to let aioquic:
-    #   1. Process incoming ACKs → grow CWND
-    #   2. Send MAX_STREAM_DATA window updates to prevent flow-control stall
-    # 4 MB = 4 disk reads × 0.3ms = yield every ~1.2ms ≈ 4 RTTs — solid cadence.
-    FLUSH_INTERVAL = 4 * 1024 * 1024   # yield every 4 MB
-    buffered = 0
+    # Use run_in_executor to offload blocking disk reads to a thread pool.
+    # This keeps the asyncio event loop alive during every f.read() call so
+    # aioquic can CONTINUOUSLY:
+    #   1. Send buffered packets into UDP → no stalls between reads
+    #   2. Process incoming ACKs         → CWND grows in real time
+    #   3. Send MAX_STREAM_DATA frames   → flow-control window never drains
+    # This is the same pattern the receiver already uses for disk WRITES.
+    # No explicit sleep(0) or FLUSH_INTERVAL needed — run_in_executor yields
+    # the event loop on every single 1 MB read naturally.
+    DISK_READ_CHUNK = 1 * 1024 * 1024   # 1 MB per read — good fit for NVMe
+    loop = asyncio.get_running_loop()
 
     with open(abs_path, "rb") as f:
         while True:
-            chunk = f.read(DISK_READ_CHUNK)  # small read → short block → event loop stays alive
+            # Non-blocking disk read: event loop runs freely during I/O
+            chunk = await loop.run_in_executor(None, f.read, DISK_READ_CHUNK)
             if not chunk:
                 break
             data_writer.write(chunk)
-            buffered += len(chunk)
-            if buffered >= FLUSH_INTERVAL:
-                await asyncio.sleep(0)   # yield: aioquic processes ACKs, grows CWND
-                buffered = 0
 
     data_writer.write_eof()
     await data_writer.drain()  # final drain — let aioquic finish sending the tail
@@ -303,38 +306,32 @@ async def send_file_with_progress(
 
     # --- Data stream ---
     _, data_writer = await connection.protocol.create_stream()
-    chunk_size = calculate_optimal_chunk_size(file_size_bytes=filesize)
     bytes_sent = 0
-    # KEY INSIGHT: f.read() is SYNCHRONOUS — it blocks the asyncio event loop
-    # for the entire duration of the disk read.  On NVMe at ~3 GB/s:
-    #   1 MB read  ≈ 0.3 ms ≈ 1 GigE RTT   ← safe, event loop gets CPU quickly
-    #  16 MB read  ≈ 5  ms ≈ 17 GigE RTTs  ← CWND collapses, ACKs pile up
-    # chunk_size (from wifi_speed) is used by the RECEIVER's async reader only.
-    # The sender must use a small, fixed DISK_READ_CHUNK.
-    DISK_READ_CHUNK = 1 * 1024 * 1024   # 1 MB per blocking disk read
-    # After accumulating FLUSH_INTERVAL bytes, yield to let aioquic:
-    #   1. Process incoming ACKs → grow CWND
-    #   2. Send MAX_STREAM_DATA window updates to prevent flow-control stall
-    # 4 MB = 4 disk reads × 0.3ms = yield every ~1.2ms ≈ 4 RTTs — solid cadence.
-    FLUSH_INTERVAL = 4 * 1024 * 1024   # yield every 4 MB
-    buffered = 0
+    # Use run_in_executor to offload blocking disk reads to a thread pool.
+    # This keeps the asyncio event loop alive during every f.read() call so
+    # aioquic can CONTINUOUSLY:
+    #   1. Send buffered packets into UDP → no stalls between reads
+    #   2. Process incoming ACKs         → CWND grows in real time
+    #   3. Send MAX_STREAM_DATA frames   → flow-control window never drains
+    # This is the same pattern the receiver already uses for disk WRITES.
+    # No explicit sleep(0) or FLUSH_INTERVAL needed — run_in_executor yields
+    # the event loop on every single 1 MB read naturally.
+    DISK_READ_CHUNK = 1 * 1024 * 1024   # 1 MB per read — good fit for NVMe
+    loop = asyncio.get_running_loop()
 
     with open(abs_path, "rb") as f:
         while True:
-            chunk = f.read(DISK_READ_CHUNK)  # small read → short block → event loop stays alive
+            # Non-blocking disk read: event loop runs freely during I/O
+            chunk = await loop.run_in_executor(None, f.read, DISK_READ_CHUNK)
             if not chunk:
                 break
             data_writer.write(chunk)
-            buffered += len(chunk)
             bytes_sent += len(chunk)
             if on_progress:
                 try:
                     on_progress(bytes_sent)
                 except Exception:
                     pass
-            if buffered >= FLUSH_INTERVAL:
-                await asyncio.sleep(0)   # yield: aioquic processes ACKs, grows CWND
-                buffered = 0
 
     data_writer.write_eof()
     await data_writer.drain()  # final drain — let aioquic finish sending the tail

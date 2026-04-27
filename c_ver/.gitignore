@@ -1,0 +1,8 @@
+build/
+*.crt
+*.key
+*.txt
+*.bin
+*.img
+!CMakeLists.txt
+!help.txt

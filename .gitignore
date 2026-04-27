@@ -75,3 +75,9 @@ python_ui/
 32bitscreens/__pycache__/
 32bitscreens/dist/
 32bitscreens/build/
+
+# Ignore everything in c_ver/build/
+c_ver/build/*
+# But explicitly include the compiled binaries
+!c_ver/build/sender
+!c_ver/build/receiver

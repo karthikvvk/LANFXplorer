@@ -229,6 +229,39 @@ echo "[+] Installing pip + dependencies"
 "$PY_PREFIX/bin/python3" -m pip install -r "$APP_DIR/requirements.txt"
 
 # ===============================
+# Build MsQuic CLI binaries (c_ver/sender + c_ver/receiver)
+# ===============================
+echo "[+] Building MsQuic CLI binaries (c_ver/sender, c_ver/receiver)"
+
+# Ensure cmake and libmsquic are available
+if ! command -v cmake > /dev/null 2>&1; then
+  echo "[+] cmake not found — installing..."
+  if command -v apt-get > /dev/null 2>&1; then
+    sudo apt-get install -y cmake
+  elif command -v dnf > /dev/null 2>&1; then
+    sudo dnf install -y cmake
+  elif command -v pacman > /dev/null 2>&1; then
+    sudo pacman -Sy --noconfirm cmake
+  else
+    echo "[!] Cannot install cmake automatically. Install it manually and re-run install.sh."
+    exit 1
+  fi
+fi
+
+if ! ldconfig -p 2>/dev/null | grep -q libmsquic; then
+  echo "[!] WARNING: libmsquic not found in system libraries."
+  echo "    Install MsQuic from: https://github.com/microsoft/msquic/releases"
+  echo "    or via: sudo apt install libmsquic (if your distro packages it)"
+  echo "    Skipping binary build — transfer will fail until libmsquic is installed."
+else
+  CVER_DIR="$APP_DIR/c_ver"
+  cmake -B "$CVER_DIR/build" -DCMAKE_BUILD_TYPE=Release "$CVER_DIR" && \
+  cmake --build "$CVER_DIR/build" && \
+  echo "[✓] MsQuic binaries built: $CVER_DIR/build/sender  $CVER_DIR/build/receiver" || \
+  echo "[!] MsQuic binary build failed — check cmake output above."
+fi
+
+# ===============================
 # Firewall rules
 # ===============================
 echo "[+] Configuring firewall rules for LANFXplorer..."

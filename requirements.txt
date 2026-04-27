@@ -1,11 +1,11 @@
-aioquic
+# aioquic removed — QUIC transport now uses MsQuic CLI binaries (c_ver/build/sender, c_ver/build/receiver)
 paramiko
 requests
 flask
 python-dotenv
 elevate
 scapy
-# NOTE: ownca removed — requires cryptography<35, incompatible with aioquic>=42
+# NOTE: ownca removed — requires cryptography<35
 cryptography>=42.0,<46.0
 pyOpenSSL
 service-identity

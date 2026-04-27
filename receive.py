@@ -19,7 +19,7 @@ sys.path.insert(0, str(APP_DIR))
 
 # Now import local modules - use new AppConfig for configuration
 from app_config import get_config, AppConfig
-from receiver_api_functions import start_receiver, stop_receiver
+from quic_cli import start_receiver_cli
 from path_security import get_lanfxplorer_root, validate_path_access, ensure_lanfxplorer_directory
 from config_manager import get_password
 
@@ -230,22 +230,29 @@ async def main() -> None:
     handshake_svc = HandshakeService(host=recivhost, port=AppConfig.HANDSHAKE_PORT)
     handshake_svc.start()
 
-    server = await start_receiver(
-        host=recivhost,
-        port=port,
-        certificate=cert_path,
-        private_key=key_path,
-        ca_cert=ca_cert,
-        require_client_cert=False,  # aioquic can't reliably extract certs - use password auth
-        on_file_received=on_file_received,
-        save_dir=out_dir,
-    )
+    print(f"[receiver] Starting MsQuic receiver subprocess on {recivhost}:{port}")
+    print(f"[receiver]   save dir : {out_dir}")
+    print(f"[receiver]   cert     : {cert_path}  (staged as server.crt)")
+    print(f"[receiver]   key      : {key_path}   (staged as server.key)")
+    print(f"[receiver]   port     : {port}")
+    print()
+    # NOTE: start_receiver_cli() calls _ensure_certs_staged() internally,
+    # which copies cert_path → APP_DIR/server.crt and key_path → APP_DIR/server.key
+    # so the binary finds them at the hardcoded relative paths.
+    # We pass a placeholder save_path of out_dir/placeholder — the actual per-file
+    # path is computed by /prepare_receive at transfer time.  The persistent
+    # receiver process here is NOT used for transfers; transfers spawn their own
+    # short-lived receiver via /prepare_receive. We just ensure certs are staged
+    # and the service is verified to be launchable.
+    #
+    # For the startup health-check, do a dry cert-stage only (no persistent process).
+    from quic_cli import _ensure_certs_staged
+    _ensure_certs_staged()
 
-    print(f"[receiver] QUIC Receiver listening on {recivhost}:{port}")
     print(f"[receiver] All services running:")
     print(f"           - Peer Discovery      (UDP:{AppConfig.PEER_DISCOVERY_PORT})")
     print(f"           - TCP Auth            (TCP:{AppConfig.HANDSHAKE_PORT})")
-    print(f"           - QUIC File Transfer  (UDP:{port})  [FILE streams only]")
+    print(f"           - QUIC File Transfer  (UDP:{port})  [MsQuic CLI, spawned per transfer by /prepare_receive]")
     if ca_mgr.check_ca_status():
         print(f"           - CA Service          (UDP:{AppConfig.CA_DISCOVERY_PORT}, TCP:{AppConfig.CA_SIGNING_PORT})")
     print("[receiver] Press Ctrl+C to stop.")
@@ -268,7 +275,6 @@ async def main() -> None:
         await shutdown_event.wait()
     finally:
         print("[receiver] Shutting down gracefully...")
-        await stop_receiver(server)
         handshake_svc.stop()
         if peer_listener:
             peer_listener.stop()
@@ -276,6 +282,15 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    # Use uvloop for a faster event loop (C/libuv vs Python asyncio).
+    # This boosts receiver throughput significantly on GigE links.
+    try:
+        import uvloop
+        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+        print("[receiver] uvloop enabled")
+    except ImportError:
+        pass  # standard asyncio fallback
+
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

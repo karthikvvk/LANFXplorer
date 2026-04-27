@@ -1,0 +1,93 @@
+only works on arch
+
+
+BIN FILE CREATE
+dd if=/dev/zero of=testfile.img bs=1M count=1024
+
+
+
+Get system capacity:
+import os
+
+pages = os.sysconf("SC_PHYS_PAGES")
+page_size = os.sysconf("SC_PAGE_SIZE")
+ram_bytes = pages * page_size
+value = int(ram_bytes * 0.01)
+value = min(value, 2147483647)
+print(value)
+print(f"{value / 1024 / 1024:.2f} MB")
+
+
+-------------------------------------------------------------
+
+SETTINGS
+
+View capacity:
+sysctl net.core.rmem_max
+sysctl net.core.wmem_max
+
+
+
+VM:
+sudo sysctl -w net.core.rmem_max=41092014
+sudo sysctl -w net.core.wmem_max=41092014
+
+HOST:
+sudo sysctl -w net.core.rmem_max=164397178
+sudo sysctl -w net.core.wmem_max=164397178
+
+
+sudo sysctl -w net.core.rmem_max=26214400
+sudo sysctl -w net.core.wmem_max=26214400
+
+
+sudo sysctl -w net.core.rmem_max=2147483647
+sudo sysctl -w net.core.wmem_max=2147483647
+
+
+
+sudo sysctl -w net.core.rmem_max=134217728    # 128 MB
+sudo sysctl -w net.core.wmem_max=134217728    # 128 MB
+sudo sysctl -w net.core.rmem_default=134217728
+sudo sysctl -w net.core.wmem_default=134217728
+
+
+-------------------------------------------------------------
+
+INSTALL
+yay -S msquic
+
+
+KEY GEN
+openssl req -x509 -newkey rsa:2048 -keyout server.key \
+            -out server.crt -days 365 -nodes -subj "/CN=localhost"
+
+Build
+cmake -B build && cmake --build build
+
+
+COMPILE
+g++ -std=c++17 -O2 receiver.cpp -lmsquic -o build/receiver
+g++ -std=c++17 -O2 sender.cpp -lmsquic -o build/sender
+
+
+
+
+
+RUN
+# Terminal 1
+./build/receiver 4433 received.bin
+
+# Terminal 2
+./build/sender testfile.img 127.0.0.1 4433
+
+
+
+VERIFY
+md5sum testfile.img received.bin
+
+
+
+
+
+-------------------------------------------------------------
