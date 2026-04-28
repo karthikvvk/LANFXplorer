@@ -446,8 +446,36 @@ def write_env(installer=False):
 
     try:
         get_network_info()
-    except:
-        raise RuntimeError("[-] No network interface found (no Ethernet, no WiFi) — cannot start")
+    except Exception as _net_err:
+        _err_msg = "No network interface found (no Ethernet, no WiFi).\n\nLANFXplorer cannot start without a network connection.\nPlease connect to a network and try again."
+        # ── Show a system error popup ──────────────────────────────────────
+        try:
+            import tkinter as _tk
+            from tkinter import messagebox as _mb
+            _root = _tk.Tk()
+            _root.withdraw()          # hide the blank root window
+            _root.attributes("-topmost", True)
+            _mb.showerror(
+                title="LANFXplorer — Network Error",
+                message=_err_msg,
+                parent=_root,
+            )
+            _root.destroy()
+        except Exception:
+            # Fallback: try zenity (GTK) if tkinter is unavailable
+            try:
+                import subprocess as _sp
+                _sp.run(
+                    ["zenity", "--error",
+                     "--title=LANFXplorer — Network Error",
+                     f"--text={_err_msg}",
+                     "--width=400"],
+                    timeout=30,
+                )
+            except Exception:
+                pass  # No GUI available — error will still propagate below
+        # ───────────────────────────────────────────────────────────────────
+        raise RuntimeError("[-] No network interface found (no Ethernet, no WiFi) — cannot start") from _net_err
    
     # Ensure Lanfxplorer directory exists and use it for OUTDIR/SRCDIR
     secure_root = ensure_lanfxplorer_directory()
