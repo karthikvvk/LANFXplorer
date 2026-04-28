@@ -668,29 +668,27 @@ def send_files():
                     print(f"[send_files] [{time.asctime()}] ✗ Failed: {filename}")
 
                 # ── Step 4: Wait for remote port to fully release ──────────────
-                # The receiver C binary does MsQuic teardown after the sender
-                # disconnects (~300 ms + OS port release). If we immediately call
-                # /prepare_receive for the next file we get 503 "port busy" and
-                # skip the file. Poll until the remote reports port is free.
-                _port_free = False
-                _port_deadline = time.time() + 8   # max 8 s between files
-                while time.time() < _port_deadline:
-                    try:
-                        _probe = requests.post(
-                            f"http://{remote_host}:5000/prepare_receive",
-                            json={"filename": "__port_probe__",
-                                  "filesize": 0, "probe": True},
-                            timeout=3,
-                        )
-                        if _probe.status_code != 503:
-                            _port_free = True
-                            break   # port is free
-                    except requests.RequestException:
-                        _port_free = True
-                        break   # can't reach remote — let next iteration handle
-                    time.sleep(0.4)
-                if not _port_free:
-                    print(f"[send_files] Port still busy after 8s — continuing anyway")
+                # TEMPORARILY DISABLED — proceeding immediately to next file.
+                # Re-enable if 503 "port busy" collisions reappear on folder transfers.
+                # _port_free = False
+                # _port_deadline = time.time() + 8
+                # while time.time() < _port_deadline:
+                #     try:
+                #         _probe = requests.post(
+                #             f"http://{remote_host}:5000/prepare_receive",
+                #             json={"filename": "__port_probe__",
+                #                   "filesize": 0, "probe": True},
+                #             timeout=3,
+                #         )
+                #         if _probe.status_code != 503:
+                #             _port_free = True
+                #             break
+                #     except requests.RequestException:
+                #         _port_free = True
+                #         break
+                #     time.sleep(0.4)
+                # if not _port_free:
+                #     print(f"[send_files] Port still busy after 8s — continuing anyway")
 
             # ── After the loop: decide overall task outcome ────────────────────
             if transport_error:
