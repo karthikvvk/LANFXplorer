@@ -306,17 +306,32 @@ mkdir -p "$APP_DIR/data" "$APP_DIR/logs"
 DESKTOP_FILE="$HOME/.local/share/applications/lanfxplorer.desktop"
 mkdir -p "$(dirname "$DESKTOP_FILE")"
 
+# Make new service scripts executable
+chmod +x "$APP_DIR/lanfxplorer_service.sh" 2>/dev/null || true
+chmod +x "$APP_DIR/lanfxplorer_ui.sh"      2>/dev/null || true
+chmod +x "$APP_DIR/install_service.sh"    2>/dev/null || true
+
+# Desktop entry points to the UI-only launcher (no terminal popup)
 cat > "$DESKTOP_FILE" <<EOF
 [Desktop Entry]
-Name=LANFXplorer
-Exec=$APP_DIR/app.sh
-Icon=network-workgroup
-Terminal=true
+Version=1.1
 Type=Application
-Categories=Network;Utility;
+Name=LANFXplorer
+GenericName=LAN File Transfer
+Comment=High-speed P2P LAN file transfer over QUIC. Backend service auto-starts; this opens the UI only.
+Exec=$APP_DIR/lanfxplorer_ui.sh
+Icon=$APP_DIR/lanfxplorery.png
+Terminal=false
+StartupNotify=true
+StartupWMClass=lanfxplorer
+Categories=Network;FileTransfer;Utility;
+Keywords=LAN;file;transfer;QUIC;P2P;share;
 EOF
 
 chmod +x "$DESKTOP_FILE"
+if command -v update-desktop-database > /dev/null 2>&1; then
+  update-desktop-database "$(dirname "$DESKTOP_FILE")" 2>/dev/null || true
+fi
 touch "$APP_DIR/.installed"
 
 # ===============================
@@ -329,7 +344,42 @@ else
 fi
 
 echo "[✓] Installation complete"
-
-
 chmod +x app.sh
-$(pwd)/app.sh
+
+# ===============================
+# Install systemd user service
+# ===============================
+echo ""
+echo "[+] Installing LANFXplorer systemd user service..."
+if command -v systemctl > /dev/null 2>&1 && systemctl --user list-units > /dev/null 2>&1; then
+  "$APP_DIR/install_service.sh" || {
+    echo "[!] Service installation encountered an issue (non-fatal)."
+    echo "    You can install it later with: $APP_DIR/install_service.sh"
+    echo "    For now, launching via app.sh (terminal mode)..."
+    exec "$APP_DIR/app.sh"
+  }
+else
+  echo "[!] systemd user services not available on this system."
+  echo "    Launching via app.sh instead..."
+  exec "$APP_DIR/app.sh"
+fi
+
+# ===============================
+# All done
+# ===============================
+echo ""
+echo "╔══════════════════════════════════════════════════════╗"
+echo "║       LANFXplorer installation complete!             ║"
+echo "╠══════════════════════════════════════════════════════╣"
+echo "║  The backend service starts automatically on login.  ║"
+echo "║  Click the desktop icon (or run lanfxplorer_ui.sh)  ║"
+echo "║  to open the UI — closing it keeps the backend live. ║"
+echo "╠══════════════════════════════════════════════════════╣"
+echo "║  Quick management:                                   ║"
+echo "║    Status  : ./install_service.sh --status           ║"
+echo "║    Logs    : ./install_service.sh --logs             ║"
+echo "║    Restart : ./install_service.sh --restart          ║"
+echo "║    Remove  : ./install_service.sh --remove           ║"
+echo "╚══════════════════════════════════════════════════════╝"
+echo ""
+exit 0

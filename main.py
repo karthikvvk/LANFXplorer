@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
 LANFXplorer Main Entry Point
+
+Supports two run modes:
+  - Normal (GUI): starts backend + Flutter/Tkinter UI
+  - Headless service (LANFXPLORER_HEADLESS=1): starts backend only,
+    notifies systemd via sd_notify, and blocks until SIGTERM.
 """
 
 import os
@@ -15,8 +20,29 @@ import subprocess
 import time
 import platform
 import signal
+import threading
 
 from startsetup import write_env
+
+# ── systemd sd_notify helper ──────────────────────────────────────────────────
+def _sd_notify(state: str) -> None:
+    """Send a notification string to systemd via $NOTIFY_SOCKET if available.
+
+    Allows systemd to track service readiness (Type=notify would need
+    sd_notify; with Type=simple this is a best-effort quality-of-life
+    improvement for accurate `systemctl status` output).
+    """
+    sock_path = os.environ.get("NOTIFY_SOCKET")
+    if not sock_path:
+        return
+    try:
+        import socket as _sock
+        with _sock.socket(_sock.AF_UNIX, _sock.SOCK_DGRAM) as s:
+            if sock_path.startswith("@"):
+                sock_path = "\x00" + sock_path[1:]
+            s.sendto(state.encode(), sock_path)
+    except Exception:
+        pass
 
 
 def print_status(status: str, message: str):
@@ -200,31 +226,6 @@ def main():
     print_status("info", "Cleaning services")
     cleanup_existing_services()
 
-    # ── firewall punch-through (runs every launch, idempotent) ──────────────
-    # NOTE: Same-host port probes (loopback/LAN-IP from the same machine) bypass
-    # the INPUT chain entirely, so they always report "reachable" even when the
-    # firewall is blocking external clients. We therefore ALWAYS ensure rules are
-    # in place via the installer, which skips any rules that already exist (fast).
-    # print_status("run", "Ensuring firewall rules for app ports…")
-    # try:
-    #     fw_script = str(APP_DIR / "firewall_manager.py")
-    #     # sudo will prompt for password if the credential cache has expired;
-    #     # once rules exist the installer exits in under a second.
-    #     ret = subprocess.run(
-    #         ["sudo", sys.executable, fw_script, "--install"],
-    #         timeout=60
-    #     ).returncode
-    #     if ret == 0:
-    #         print_status("ok", "Firewall rules confirmed.")
-    #     else:
-    #         print_status("warn",
-    #             "Firewall setup returned non-zero — continuing anyway.\n"
-    #             f"  → If peers can't connect, run: sudo python3 firewall_manager.py --install"
-    #         )
-    # except Exception as fw_err:
-    #     print_status("warn", f"Firewall setup skipped ({fw_err})")
-
-
     # ── setup ──
     if not run_script("startsetup.py", True):
         return
@@ -243,6 +244,11 @@ def main():
     api = run_script("api_bridge.py", False)
 
     print_status("ok", "System running")
+
+    # ── Systemd readiness notification ──────────────────────────────────────
+    # Tell systemd the service is ready.  Harmless when not running under
+    # systemd (NOTIFY_SOCKET will be absent and the call is a no-op).
+    _sd_notify("READY=1\nSTATUS=LANFXplorer backend running")
 
     # ── UI ──
     import struct
@@ -266,7 +272,6 @@ def main():
                     # Run without overriding cwd so it finds .env in the project root
                     ui_launched = True
                     subprocess.run([str(flutter_bin)])
-                    # ui_launched = True
                 except KeyboardInterrupt:
                     pass  # Ctrl+C from user — clean exit
                 except Exception as e:
@@ -285,17 +290,59 @@ def main():
                 print_status("warn", f"Tkinter UI failed to start: {e}")
 
     if not ui_launched:
+        # ── Headless / service mode ───────────────────────────────────────────
+        # Block here until systemd sends SIGTERM (or user sends SIGINT/SIGTERM).
+        # Use an Event so the signal handler can wake us up cleanly without
+        # relying on KeyboardInterrupt (which SIGTERM does NOT raise).
         if headless:
-            print_status("info", "Headless mode — UI suppressed")
+            print_status("info", "Headless mode — UI suppressed. Backend services active.")
         else:
             print_status("warn", "No UI could be started — running headless")
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
+
+        _shutdown = threading.Event()
+
+        def _handle_stop(signum, frame):  # noqa: ANN001
+            print_status("info", f"Received signal {signum} — initiating shutdown")
+            _sd_notify("STOPPING=1")
+            _shutdown.set()
+
+        signal.signal(signal.SIGTERM, _handle_stop)
+        signal.signal(signal.SIGINT,  _handle_stop)
+
+        print_status("info", "Waiting for stop signal (SIGTERM/SIGINT)...")
+
+        # ── Watchdog keepalive ────────────────────────────────────────────────────
+        # systemd sets WATCHDOG_USEC when WatchdogSec is configured in the unit.
+        # We must send WATCHDOG=1 within that interval or systemd will consider the
+        # service hung and restart it.  We ping at half the interval (safe margin).
+        _watchdog_usec = int(os.environ.get("WATCHDOG_USEC", 0))
+        if _watchdog_usec > 0:
+            _ping_interval = max(1.0, (_watchdog_usec / 1_000_000) / 2)
+            print_status("info", f"Watchdog enabled — pinging systemd every {_ping_interval:.0f}s")
+
+            def _watchdog_loop():
+                while not _shutdown.is_set():
+                    _sd_notify("WATCHDOG=1")
+                    _shutdown.wait(timeout=_ping_interval)
+
+            _wd_thread = threading.Thread(target=_watchdog_loop, name="watchdog", daemon=True)
+            _wd_thread.start()
+        else:
+            # No watchdog configured — plain wait is fine.
             pass
 
+        _shutdown.wait()  # Block until SIGTERM / SIGINT
+
     print_status("info", "Shutdown")
+    # Terminate child processes (receiver, api_bridge) if still alive
+    for child_name, child_proc in (("receive.py", receiver), ("api_bridge.py", api)):
+        if child_proc and child_proc.poll() is None:
+            print_status("info", f"Stopping {child_name} (PID {child_proc.pid})")
+            child_proc.terminate()
+            try:
+                child_proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                child_proc.kill()
 
 
 if __name__ == "__main__":

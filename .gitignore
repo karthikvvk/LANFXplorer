@@ -1,5 +1,5 @@
 *.pem
-# *.txt
+*.txt
 *.json
 send_files/
 received_files/
@@ -65,6 +65,7 @@ app.*.map.json
 *.hologram.dart
 *.tar*
 *.zip*
+*.crt
 /virtual/
 *.html
 Notes.md
@@ -81,3 +82,5 @@ c_ver/build/*
 # But explicitly include the compiled binaries
 !c_ver/build/sender
 !c_ver/build/receiver
+
+!requirements.txt

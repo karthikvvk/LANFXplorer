@@ -1,0 +1,76 @@
+[Unit]
+Description=LANFXplorer Backend Service
+Documentation=https://github.com/karthikvvk/LANFXplorer
+# Wait for the network to have an IP address before starting.
+# "network-online.target" is the correct target for user services
+# that need a live network interface (peer discovery, QUIC bind, etc.)
+After=network-online.target
+Wants=network-online.target
+
+# Also wait for the D-Bus session bus so keyring access works.
+After=dbus.socket
+
+[Service]
+# notify: systemd waits for READY=1 via sd_notify() before declaring the
+# service active.  main.py sends this after all ports are bound and ready.
+Type=notify
+
+# ---------- Working directory & script ----------
+# Use %h (home dir) as the working directory — it always exists.
+# lanfxplorer_service.sh creates ~/.local/share/lanfxplorer-workdir itself
+# before exec'ing Python, so no ExecStartPre mkdir is needed.
+WorkingDirectory=%h
+# The real APP_DIR is resolved inside lanfxplorer_service.sh via readlink.
+# We use __APP_DIR__ as a placeholder that install_service.sh replaces.
+ExecStart=__APP_DIR__/lanfxplorer_service.sh
+
+# ---------- Restart behaviour ----------
+# Restart the backend automatically if it crashes.
+# Do NOT restart on clean exit (code 0) or user-requested stop.
+Restart=on-failure
+RestartSec=10s
+# Give up after 5 consecutive fast failures (within 2 minutes)
+StartLimitInterval=120s
+StartLimitBurst=5
+
+# ---------- Logging ----------
+# stdout/stderr go to the systemd journal.
+# View with: journalctl --user -u lanfxplorer-backend -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lanfxplorer-backend
+
+# ---------- Environment ----------
+# Suppress Flutter/Tkinter UI: this is a headless backend only.
+Environment=LANFXPLORER_HEADLESS=1
+
+# Pass through essential variables from the user session.
+# systemd user services inherit the user's environment ONLY when
+# these are present in the systemd user environment block.
+# Run `systemctl --user import-environment` in your shell login script
+# if DBUS_SESSION_BUS_ADDRESS / XDG_RUNTIME_DIR are missing.
+PassEnvironment=DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR HOME USER LANG PATH
+
+# ---------- Security hardening (optional, non-breaking) ----------
+# These settings prevent the service from escalating privileges or
+# accessing other users' files, without breaking the application.
+NoNewPrivileges=true
+ProtectHome=false
+PrivateTmp=false
+
+# ---------- Timeout ----------
+# Give the backend up to 120 s to perform PKI / CA discovery + network wait at startup.
+# sd_notify READY=1 is sent after all ports are bound, so Type=notify is safe here.
+TimeoutStartSec=120s
+TimeoutStopSec=15s
+
+# ---------- Watchdog ----------
+# If the backend stops sending sd_notify WATCHDOG=1 pings for 60 s,
+# systemd considers it hung and restarts it.
+# main.py sends the ping every ~30 s (half the interval, as recommended).
+WatchdogSec=60s
+
+[Install]
+# Enable with: systemctl --user enable lanfxplorer-backend
+# Start on graphical login (equivalent to "start on logon" for user services)
+WantedBy=default.target
