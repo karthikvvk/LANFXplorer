@@ -90,18 +90,18 @@ cmd_remove() {
     info "Unit not installed — nothing to remove."
   fi
 
-  # Revert desktop entry back to terminal=true style (uses app.sh)
+  # Revert desktop entry to app.sh launcher (no terminal window)
   if [ -f "$DESKTOP_FILE" ]; then
     cat > "$DESKTOP_FILE" <<EOF
 [Desktop Entry]
 Name=LANFXplorer
 Exec=$APP_DIR/app.sh
 Icon=network-workgroup
-Terminal=true
+Terminal=false
 Type=Application
 Categories=Network;Utility;
 EOF
-    ok "Desktop entry reverted to terminal mode: $DESKTOP_FILE"
+    ok "Desktop entry reverted: $DESKTOP_FILE"
   fi
 
   ok "Service removed. You can re-install with: ./install_service.sh"
@@ -137,7 +137,7 @@ cmd_install() {
 
   # ── Make scripts executable ──
   chmod +x "$APP_DIR/lanfxplorer_service.sh"
-  chmod +x "$APP_DIR/lanfxplorer_ui.sh"
+  chmod +x "$APP_DIR/app.sh"
   ok "Scripts made executable."
 
   # ── Create log directory ──
@@ -211,7 +211,7 @@ Type=Application
 Name=LANFXplorer
 GenericName=LAN File Transfer
 Comment=High-speed P2P LAN file transfer over QUIC. Backend service auto-starts; this opens the UI only.
-Exec=$APP_DIR/lanfxplorer_ui.sh
+Exec=$APP_DIR/app.sh
 Icon=$APP_DIR/lanfxplorery.png
 Terminal=false
 StartupNotify=true

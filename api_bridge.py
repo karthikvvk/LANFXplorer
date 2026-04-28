@@ -74,11 +74,18 @@ def get_time():
         return wrapper
     return decorator
 
-_transfer_tasks = {}  # task_id -> {status, progress, total_size, transferred, files, error, start_time, estimated_duration}
+# [TRANSFER STATUS DISABLED] ──────────────────────────────────────────────────
+# _transfer_tasks = {}  # task_id -> {status, progress, total_size, transferred, files, error, start_time, estimated_duration}
 
-# Mapping of task_id -> remote_host for fetch operations that need to proxy status requests
-_fetch_task_mapping = {}  # task_id -> {"remote_host": str, "remote_task_id": str}
+# # Mapping of task_id -> remote_host for fetch operations that need to proxy status requests
+# _fetch_task_mapping = {}  # task_id -> {"remote_host": str, "remote_task_id": str}
 
+# _transfer_lock = Lock()
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Stub replacements so existing references don't crash at import time
+_transfer_tasks = {}
+_fetch_task_mapping = {}
 _transfer_lock = Lock()
 
 # Cache WiFi speed (detect once at startup or first transfer)
@@ -99,87 +106,107 @@ def _get_cached_wifi_speed():
     return _wifi_speed_mbps
 
 
+# [TRANSFER STATUS DISABLED] _create_transfer_task commented out ──────────────
+# def _create_transfer_task(files: list, remote_host: str, direction: str = "send") -> str:
+#     """Create a new transfer task and return its ID."""
+#     task_id = str(uuid.uuid4())
+#     total_size = 0
+#     for f in files:
+#         if os.path.isfile(f):
+#             total_size += os.path.getsize(f)
+#
+#     wifi_speed = _get_cached_wifi_speed()
+#     estimated_duration = estimate_transfer_time_seconds(total_size, wifi_speed)
+#
+#     with _transfer_lock:
+#         _transfer_tasks[task_id] = {
+#             "status": "in_progress",
+#             "progress": 0.0,
+#             "total_size": total_size,
+#             "transferred": 0,
+#             "files": files,
+#             "remote_host": remote_host,
+#             "direction": direction,
+#             "error": None,
+#             "current_file": files[0] if files else None,
+#             "start_time": time.time(),
+#             "estimated_duration": estimated_duration,
+#             "wifi_speed_mbps": wifi_speed,
+#             # ── Per-file tracking ──────────────────────────────────────────
+#             # Ground truth: updated after each file's send_file_cli() returns.
+#             "total_files": len(files),
+#             "completed_count": 0,
+#             "completed_files": [],   # basenames/relpaths confirmed on remote disk
+#             "failed_files": [],      # basenames/relpaths that failed
+#         }
+#     print(f"[transfer] Task {task_id[:8]}... created: {len(files)} files, "
+#           f"{total_size/(1024*1024):.1f}MB, ETA: {estimated_duration:.1f}s at {wifi_speed}Mbps")
+#     return task_id
+# ─────────────────────────────────────────────────────────────────────────────
 def _create_transfer_task(files: list, remote_host: str, direction: str = "send") -> str:
-    """Create a new transfer task and return its ID."""
-    task_id = str(uuid.uuid4())
-    total_size = 0
-    for f in files:
-        if os.path.isfile(f):
-            total_size += os.path.getsize(f)
-
-    wifi_speed = _get_cached_wifi_speed()
-    estimated_duration = estimate_transfer_time_seconds(total_size, wifi_speed)
-
-    with _transfer_lock:
-        _transfer_tasks[task_id] = {
-            "status": "in_progress",
-            "progress": 0.0,
-            "total_size": total_size,
-            "transferred": 0,
-            "files": files,
-            "remote_host": remote_host,
-            "direction": direction,
-            "error": None,
-            "current_file": files[0] if files else None,
-            "start_time": time.time(),
-            "estimated_duration": estimated_duration,
-            "wifi_speed_mbps": wifi_speed,
-            # ── Per-file tracking ──────────────────────────────────────────
-            # Ground truth: updated after each file's send_file_cli() returns.
-            "total_files": len(files),
-            "completed_count": 0,
-            "completed_files": [],   # basenames/relpaths confirmed on remote disk
-            "failed_files": [],      # basenames/relpaths that failed
-        }
-    print(f"[transfer] Task {task_id[:8]}... created: {len(files)} files, "
-          f"{total_size/(1024*1024):.1f}MB, ETA: {estimated_duration:.1f}s at {wifi_speed}Mbps")
-    return task_id
+    """DISABLED: Transfer status tracking is disabled. Returns a stub task_id."""
+    return str(uuid.uuid4())
 
 
+# [TRANSFER STATUS DISABLED] _update_transfer_progress commented out ──────────
+# def _update_transfer_progress(task_id: str, bytes_sent: int, total_bytes: int):
+#     """Update transfer progress using real byte counts (not time estimates).
+#     With MsQuic CLI binaries transfers complete far faster than the old
+#     aioquic estimate — time-based simulation is always wrong here.
+#     """
+#     with _transfer_lock:
+#         if task_id in _transfer_tasks:
+#             task = _transfer_tasks[task_id]
+#             task["transferred"] = bytes_sent
+#             if total_bytes > 0:
+#                 # Real progress: how many bytes have actually been confirmed sent
+#                 # Cap at 0.99 until _complete_transfer_task sets it to 1.0
+#                 task["progress"] = min(bytes_sent / total_bytes, 0.99)
+# ─────────────────────────────────────────────────────────────────────────────
 def _update_transfer_progress(task_id: str, bytes_sent: int, total_bytes: int):
-    """Update transfer progress using real byte counts (not time estimates).
-    With MsQuic CLI binaries transfers complete far faster than the old
-    aioquic estimate — time-based simulation is always wrong here.
-    """
-    with _transfer_lock:
-        if task_id in _transfer_tasks:
-            task = _transfer_tasks[task_id]
-            task["transferred"] = bytes_sent
-            if total_bytes > 0:
-                # Real progress: how many bytes have actually been confirmed sent
-                # Cap at 0.99 until _complete_transfer_task sets it to 1.0
-                task["progress"] = min(bytes_sent / total_bytes, 0.99)
+    """DISABLED: Transfer status tracking is disabled. No-op stub."""
+    pass  # [TRANSFER STATUS DISABLED]
 
 
+# [TRANSFER STATUS DISABLED] _complete_transfer_task commented out ────────────
+# def _complete_transfer_task(task_id: str, success: bool, error: str = None):
+#     """Mark a transfer task as completed or failed."""
+#     with _transfer_lock:
+#         if task_id in _transfer_tasks:
+#             task = _transfer_tasks[task_id]
+#             task["status"] = "completed" if success else "failed"
+#             task["progress"] = 1.0 if success else task["progress"]
+#             task["error"] = error
+#             actual_duration = time.time() - task["start_time"]
+#             print(f"[transfer] Task {task_id[:8]}... {'completed' if success else 'failed'}: "
+#                   f"actual={actual_duration:.1f}s, estimated={task['estimated_duration']:.1f}s")
+# ─────────────────────────────────────────────────────────────────────────────
 def _complete_transfer_task(task_id: str, success: bool, error: str = None):
-    """Mark a transfer task as completed or failed."""
-    with _transfer_lock:
-        if task_id in _transfer_tasks:
-            task = _transfer_tasks[task_id]
-            task["status"] = "completed" if success else "failed"
-            task["progress"] = 1.0 if success else task["progress"]
-            task["error"] = error
-            actual_duration = time.time() - task["start_time"]
-            print(f"[transfer] Task {task_id[:8]}... {'completed' if success else 'failed'}: "
-                  f"actual={actual_duration:.1f}s, estimated={task['estimated_duration']:.1f}s")
+    """DISABLED: Transfer status tracking is disabled. No-op stub."""
+    pass  # [TRANSFER STATUS DISABLED]
 
 
+# [TRANSFER STATUS DISABLED] _mark_file_done commented out ────────────────────
+# def _mark_file_done(task_id: str, filename: str, success: bool) -> None:
+#     """Record a single file as sent (success) or failed within a multi-file task.
+#
+#     *filename* should be the relative path / basename shown to the user.
+#     Called from _do_send_background after every send_file_cli() returns so
+#     the Flutter UI can poll per-file progress without waiting for the whole task.
+#     """
+#     with _transfer_lock:
+#         if task_id not in _transfer_tasks:
+#             return
+#         task = _transfer_tasks[task_id]
+#         if success:
+#             task["completed_files"].append(filename)
+#             task["completed_count"] = len(task["completed_files"])
+#         else:
+#             task["failed_files"].append(filename)
+# ─────────────────────────────────────────────────────────────────────────────
 def _mark_file_done(task_id: str, filename: str, success: bool) -> None:
-    """Record a single file as sent (success) or failed within a multi-file task.
-
-    *filename* should be the relative path / basename shown to the user.
-    Called from _do_send_background after every send_file_cli() returns so
-    the Flutter UI can poll per-file progress without waiting for the whole task.
-    """
-    with _transfer_lock:
-        if task_id not in _transfer_tasks:
-            return
-        task = _transfer_tasks[task_id]
-        if success:
-            task["completed_files"].append(filename)
-            task["completed_count"] = len(task["completed_files"])
-        else:
-            task["failed_files"].append(filename)
+    """DISABLED: Transfer status tracking is disabled. No-op stub."""
+    pass  # [TRANSFER STATUS DISABLED]
 
 
 import threading
@@ -565,8 +592,9 @@ def send_files():
     # Build combined file list for task tracking
     all_file_paths = valid_files + [abs_p for abs_p, _ in folder_file_map]
 
-    # Create task for tracking
-    task_id = _create_transfer_task(all_file_paths, remote_host, "send")
+    # [TRANSFER STATUS DISABLED] task creation commented out
+    # task_id = _create_transfer_task(all_file_paths, remote_host, "send")
+    task_id = str(uuid.uuid4())  # Stub task_id — status tracking is disabled
     
     def _do_send_background():
         """
@@ -729,101 +757,130 @@ def send_files():
     thread = threading.Thread(target=_do_send_background, daemon=True)
     thread.start()
 
-    # Return immediately with task_id for polling
+    # [TRANSFER STATUS DISABLED] — return static "completed" instead of in_progress + task_id
+    # Original polling response commented out:
+    # return jsonify({
+    #     "status": "in_progress",
+    #     "task_id": task_id,
+    #     "remote_host": remote_host,
+    #     "port": port,
+    #     "files": all_file_paths,
+    #     "missing": missing
+    # }), 202  # 202 Accepted
     return jsonify({
-        "status": "in_progress",
+        "status": "completed",
         "task_id": task_id,
         "remote_host": remote_host,
         "port": port,
         "files": all_file_paths,
         "missing": missing
-    }), 202  # 202 Accepted
+    }), 200
 
 
+# [TRANSFER STATUS DISABLED] /transfer_status route commented out ─────────────
+# @app.route("/transfer_status/<task_id>", methods=["GET"])
+# def transfer_status(task_id):
+#     """Get the status of a transfer task."""
+#     # First check if this is a fetch task that needs proxying to remote host
+#     fetch_info = None
+#     with _transfer_lock:
+#         if task_id in _fetch_task_mapping:
+#             fetch_info = _fetch_task_mapping[task_id].copy()
+#
+#     # If it's a fetch task, proxy the status request to the remote host
+#     if fetch_info is not None:
+#         remote_host = fetch_info["remote_host"]
+#         remote_task_id = fetch_info["remote_task_id"]
+#
+#         try:
+#             proxy_url = f"http://{remote_host}:5000/transfer_status/{remote_task_id}"
+#             resp = requests.get(proxy_url, timeout=5)
+#
+#             if resp.status_code == 200:
+#                 remote_status = resp.json()
+#                 # Clean up mapping once transfer is complete or failed —
+#                 # this stops future proxy calls immediately.
+#                 if remote_status.get("status") in ("completed", "failed"):
+#                     with _transfer_lock:
+#                         _fetch_task_mapping.pop(task_id, None)
+#                     print(
+#                         f"[transfer_status] Task {task_id[:8]}... "
+#                         f"{remote_status['status']}, fetch mapping removed"
+#                     )
+#                 return jsonify(remote_status), 200
+#             else:
+#                 return jsonify({
+#                     "status": "error",
+#                     "message": f"Remote returned {resp.status_code}"
+#                 }), resp.status_code
+#         except requests.exceptions.RequestException as e:
+#             print(f"[!] Failed to proxy transfer_status to {remote_host}: {e}")
+#             return jsonify({
+#                 "status": "error",
+#                 "message": f"Failed to contact remote host: {str(e)}"
+#             }), 502
+#
+#     # ── Local task ───────────────────────────────────────────────────────────
+#     with _transfer_lock:
+#         if task_id not in _transfer_tasks:
+#             return jsonify({"status": "error", "message": "Task not found"}), 404
+#         task = _transfer_tasks[task_id].copy()
+#
+#     # ── Failsafe: if the sender thread already marked this completed or failed,
+#     # return immediately — do NOT recalculate anything from time estimates.
+#     if task["status"] in ("completed", "failed"):
+#         return jsonify({
+#             "status":           task["status"],
+#             "progress":         task["progress"],
+#             "total_size":       task["total_size"],
+#             "transferred":      task["transferred"],
+#             "files":            task["files"],
+#             "current_file":     task.get("current_file"),
+#             "error":            task["error"],
+#             "estimated_duration": task.get("estimated_duration", 0),
+#             "elapsed":          time.time() - task.get("start_time", time.time()),
+#             # ── Per-file tracking ──
+#             "total_files":      task.get("total_files", len(task["files"])),
+#             "completed_count":  task.get("completed_count", 0),
+#             "completed_files":  task.get("completed_files", []),
+#             "failed_files":     task.get("failed_files", []),
+#         }), 200
+#
+#     # ── In-progress ─────────────────────────────────────────────────────────
+#     return jsonify({
+#         "status":           task["status"],
+#         "progress":         task["progress"],
+#         "total_size":       task["total_size"],
+#         "transferred":      task["transferred"],
+#         "files":            task["files"],
+#         "current_file":     task.get("current_file"),
+#         "error":            task["error"],
+#         "estimated_duration": task.get("estimated_duration", 0),
+#         "elapsed":          time.time() - task.get("start_time", time.time()),
+#         # ── Per-file tracking (live-updated by _mark_file_done) ──
+#         "total_files":      task.get("total_files", len(task["files"])),
+#         "completed_count":  task.get("completed_count", 0),
+#         "completed_files":  task.get("completed_files", []),
+#         "failed_files":     task.get("failed_files", []),
+#     }), 200
+# ─────────────────────────────────────────────────────────────────────────────
 @app.route("/transfer_status/<task_id>", methods=["GET"])
 def transfer_status(task_id):
-    """Get the status of a transfer task."""
-    # First check if this is a fetch task that needs proxying to remote host
-    fetch_info = None
-    with _transfer_lock:
-        if task_id in _fetch_task_mapping:
-            fetch_info = _fetch_task_mapping[task_id].copy()
-
-    # If it's a fetch task, proxy the status request to the remote host
-    if fetch_info is not None:
-        remote_host = fetch_info["remote_host"]
-        remote_task_id = fetch_info["remote_task_id"]
-
-        try:
-            proxy_url = f"http://{remote_host}:5000/transfer_status/{remote_task_id}"
-            resp = requests.get(proxy_url, timeout=5)
-
-            if resp.status_code == 200:
-                remote_status = resp.json()
-                # Clean up mapping once transfer is complete or failed —
-                # this stops future proxy calls immediately.
-                if remote_status.get("status") in ("completed", "failed"):
-                    with _transfer_lock:
-                        _fetch_task_mapping.pop(task_id, None)
-                    print(
-                        f"[transfer_status] Task {task_id[:8]}... "
-                        f"{remote_status['status']}, fetch mapping removed"
-                    )
-                return jsonify(remote_status), 200
-            else:
-                return jsonify({
-                    "status": "error",
-                    "message": f"Remote returned {resp.status_code}"
-                }), resp.status_code
-        except requests.exceptions.RequestException as e:
-            print(f"[!] Failed to proxy transfer_status to {remote_host}: {e}")
-            return jsonify({
-                "status": "error",
-                "message": f"Failed to contact remote host: {str(e)}"
-            }), 502
-
-    # ── Local task ───────────────────────────────────────────────────────────
-    with _transfer_lock:
-        if task_id not in _transfer_tasks:
-            return jsonify({"status": "error", "message": "Task not found"}), 404
-        task = _transfer_tasks[task_id].copy()
-
-    # ── Failsafe: if the sender thread already marked this completed or failed,
-    # return immediately — do NOT recalculate anything from time estimates.
-    if task["status"] in ("completed", "failed"):
-        return jsonify({
-            "status":           task["status"],
-            "progress":         task["progress"],
-            "total_size":       task["total_size"],
-            "transferred":      task["transferred"],
-            "files":            task["files"],
-            "current_file":     task.get("current_file"),
-            "error":            task["error"],
-            "estimated_duration": task.get("estimated_duration", 0),
-            "elapsed":          time.time() - task.get("start_time", time.time()),
-            # ── Per-file tracking ──
-            "total_files":      task.get("total_files", len(task["files"])),
-            "completed_count":  task.get("completed_count", 0),
-            "completed_files":  task.get("completed_files", []),
-            "failed_files":     task.get("failed_files", []),
-        }), 200
-
-    # ── In-progress ─────────────────────────────────────────────────────────
+    """DISABLED: Transfer status tracking is disabled. Always returns static completed."""
     return jsonify({
-        "status":           task["status"],
-        "progress":         task["progress"],
-        "total_size":       task["total_size"],
-        "transferred":      task["transferred"],
-        "files":            task["files"],
-        "current_file":     task.get("current_file"),
-        "error":            task["error"],
-        "estimated_duration": task.get("estimated_duration", 0),
-        "elapsed":          time.time() - task.get("start_time", time.time()),
-        # ── Per-file tracking (live-updated by _mark_file_done) ──
-        "total_files":      task.get("total_files", len(task["files"])),
-        "completed_count":  task.get("completed_count", 0),
-        "completed_files":  task.get("completed_files", []),
-        "failed_files":     task.get("failed_files", []),
+        "status":          "completed",
+        "progress":        1.0,
+        "total_size":      0,
+        "transferred":     0,
+        "files":           [],
+        "current_file":    None,
+        "error":           None,
+        "estimated_duration": 0,
+        "elapsed":         0,
+        "total_files":     0,
+        "completed_count": 0,
+        "completed_files": [],
+        "failed_files":    [],
     }), 200
 
 
@@ -866,15 +923,15 @@ def receive_files():
         if response.status_code in (200, 202):
             result = response.json()
             
-            # Register the remote task_id for proxying status requests
-            remote_task_id = result.get("task_id")
-            if remote_task_id:
-                with _transfer_lock:
-                    _fetch_task_mapping[remote_task_id] = {
-                        "remote_host": remote_host,
-                        "remote_task_id": remote_task_id
-                    }
-                print(f"[fetch] Registered task {remote_task_id[:8]}... for status proxying to {remote_host}")
+            # [TRANSFER STATUS DISABLED] task mapping for status proxying commented out
+            # remote_task_id = result.get("task_id")
+            # if remote_task_id:
+            #     with _transfer_lock:
+            #         _fetch_task_mapping[remote_task_id] = {
+            #             "remote_host": remote_host,
+            #             "remote_task_id": remote_task_id
+            #         }
+            #     print(f"[fetch] Registered task {remote_task_id[:8]}... for status proxying to {remote_host}")
             
             return jsonify({
                 "status": "success",

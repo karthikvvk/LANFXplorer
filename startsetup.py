@@ -444,10 +444,11 @@ def write_env(installer=False):
     #     print("[+] WiFi-only mode — using existing network configuration")
     #     get_network_info()
 
-    # else:
-    #     raise RuntimeError("[-] No network interface found (no Ethernet, no WiFi) — cannot start")
-
-    get_network_info()
+    try:
+        get_network_info()
+    except:
+        raise RuntimeError("[-] No network interface found (no Ethernet, no WiFi) — cannot start")
+   
     # Ensure Lanfxplorer directory exists and use it for OUTDIR/SRCDIR
     secure_root = ensure_lanfxplorer_directory()
     

@@ -308,7 +308,7 @@ mkdir -p "$(dirname "$DESKTOP_FILE")"
 
 # Make new service scripts executable
 chmod +x "$APP_DIR/lanfxplorer_service.sh" 2>/dev/null || true
-chmod +x "$APP_DIR/lanfxplorer_ui.sh"      2>/dev/null || true
+chmod +x "$APP_DIR/app.sh"      2>/dev/null || true
 chmod +x "$APP_DIR/install_service.sh"    2>/dev/null || true
 
 # Desktop entry points to the UI-only launcher (no terminal popup)
@@ -319,7 +319,7 @@ Type=Application
 Name=LANFXplorer
 GenericName=LAN File Transfer
 Comment=High-speed P2P LAN file transfer over QUIC. Backend service auto-starts; this opens the UI only.
-Exec=$APP_DIR/lanfxplorer_ui.sh
+Exec=$APP_DIR/app.sh
 Icon=$APP_DIR/lanfxplorery.png
 Terminal=false
 StartupNotify=true
@@ -372,7 +372,7 @@ echo "╔═══════════════════════�
 echo "║       LANFXplorer installation complete!             ║"
 echo "╠══════════════════════════════════════════════════════╣"
 echo "║  The backend service starts automatically on login.  ║"
-echo "║  Click the desktop icon (or run lanfxplorer_ui.sh)  ║"
+echo "║  Click the desktop icon (or run app.sh)  ║"
 echo "║  to open the UI — closing it keeps the backend live. ║"
 echo "╠══════════════════════════════════════════════════════╣"
 echo "║  Quick management:                                   ║"
