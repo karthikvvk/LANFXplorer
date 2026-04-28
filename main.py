@@ -51,6 +51,31 @@ def print_status(status: str, message: str):
 
 
 def cleanup_existing_services():
+    # ── Stop the systemd background service first (if it is running) ─────────
+    # This ensures the service's child processes (receive.py, api_bridge.py)
+    # are cleanly terminated before we start fresh ones below.
+    #
+    # Guard: when THIS process IS the service (LANFXPLORER_HEADLESS=1) we must
+    # NOT stop ourselves — that would kill the service on every startup.
+    _is_service = os.environ.get("LANFXPLORER_HEADLESS") == "1"
+    if not _is_service:
+        try:
+            svc_check = subprocess.run(
+                ["systemctl", "--user", "is-active", "lanfxplorer-backend"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if svc_check.stdout.strip() == "active":
+                print_status("info", "Stopping lanfxplorer-backend service...")
+                subprocess.run(
+                    ["systemctl", "--user", "stop", "lanfxplorer-backend"],
+                    timeout=15,
+                )
+                time.sleep(1)   # let ports fully release
+                print_status("ok", "Service stopped")
+        except Exception as e:
+            print_status("warn", f"Could not stop service (non-fatal): {e}")
+
+    # ── Kill any remaining python processes still holding our ports ───────────
     try:
         result = subprocess.run(["ss", "-tunlp"], capture_output=True, text=True, timeout=10)
         pids_to_kill = set()
@@ -68,7 +93,7 @@ def cleanup_existing_services():
             if pid != current_pid:
                 try:
                     os.kill(pid, signal.SIGTERM)
-                    print_status("info", f"Killed PID {pid}")
+                    print_status("info", f"Killed stale PID {pid}")
                 except Exception:
                     pass
 

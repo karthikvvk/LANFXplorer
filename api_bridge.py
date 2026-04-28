@@ -106,11 +106,10 @@ def _create_transfer_task(files: list, remote_host: str, direction: str = "send"
     for f in files:
         if os.path.isfile(f):
             total_size += os.path.getsize(f)
-    
-    # Calculate estimated duration based on WiFi speed
+
     wifi_speed = _get_cached_wifi_speed()
     estimated_duration = estimate_transfer_time_seconds(total_size, wifi_speed)
-    
+
     with _transfer_lock:
         _transfer_tasks[task_id] = {
             "status": "in_progress",
@@ -125,8 +124,15 @@ def _create_transfer_task(files: list, remote_host: str, direction: str = "send"
             "start_time": time.time(),
             "estimated_duration": estimated_duration,
             "wifi_speed_mbps": wifi_speed,
+            # ── Per-file tracking ──────────────────────────────────────────
+            # Ground truth: updated after each file's send_file_cli() returns.
+            "total_files": len(files),
+            "completed_count": 0,
+            "completed_files": [],   # basenames/relpaths confirmed on remote disk
+            "failed_files": [],      # basenames/relpaths that failed
         }
-    print(f"[transfer] Task {task_id[:8]}... created: {total_size/(1024*1024):.1f}MB, ETA: {estimated_duration:.1f}s at {wifi_speed}Mbps")
+    print(f"[transfer] Task {task_id[:8]}... created: {len(files)} files, "
+          f"{total_size/(1024*1024):.1f}MB, ETA: {estimated_duration:.1f}s at {wifi_speed}Mbps")
     return task_id
 
 
@@ -153,11 +159,27 @@ def _complete_transfer_task(task_id: str, success: bool, error: str = None):
             task["status"] = "completed" if success else "failed"
             task["progress"] = 1.0 if success else task["progress"]
             task["error"] = error
-            
-            # Log actual vs estimated time
             actual_duration = time.time() - task["start_time"]
             print(f"[transfer] Task {task_id[:8]}... {'completed' if success else 'failed'}: "
                   f"actual={actual_duration:.1f}s, estimated={task['estimated_duration']:.1f}s")
+
+
+def _mark_file_done(task_id: str, filename: str, success: bool) -> None:
+    """Record a single file as sent (success) or failed within a multi-file task.
+
+    *filename* should be the relative path / basename shown to the user.
+    Called from _do_send_background after every send_file_cli() returns so
+    the Flutter UI can poll per-file progress without waiting for the whole task.
+    """
+    with _transfer_lock:
+        if task_id not in _transfer_tasks:
+            return
+        task = _transfer_tasks[task_id]
+        if success:
+            task["completed_files"].append(filename)
+            task["completed_count"] = len(task["completed_files"])
+        else:
+            task["failed_files"].append(filename)
 
 
 import threading
@@ -389,10 +411,45 @@ def list_directory():
             "info": info
         }), 200
 
-    # --------------- DIRECTORY ---------------
     if os.path.isdir(path):
+        recursive = data.get("recursive", False)
         files = []
 
+        if recursive:
+            # ── Recursive walk: flat list of every file in the entire subtree ──
+            # Useful for the UI to verify all expected files arrived after a
+            # folder transfer (compare expected relpaths vs returned relpaths).
+            try:
+                for dirpath, dirnames, filenames in os.walk(path):
+                    # Skip hidden dirs to avoid permission noise
+                    dirnames[:] = [d for d in sorted(dirnames) if not d.startswith('.')]
+                    for fname in sorted(filenames):
+                        full_path = os.path.join(dirpath, fname)
+                        try:
+                            st = os.stat(full_path)
+                            rel = os.path.relpath(full_path, path)
+                            files.append({
+                                "name":         fname,
+                                "path":         full_path,
+                                "rel_path":     rel,
+                                "is_directory": False,
+                                "size":         st.st_size,
+                                "mtime":        datetime.utcfromtimestamp(
+                                                    st.st_mtime).isoformat() + "Z",
+                            })
+                        except (PermissionError, FileNotFoundError):
+                            continue
+            except PermissionError:
+                return jsonify({"status": "error", "message": "Permission denied"}), 403
+
+            return jsonify({
+                "status":    "success",
+                "type":      "directory",
+                "recursive": True,
+                "files":     files,
+            }), 200
+
+        # ── Non-recursive (original behaviour) ──
         try:
             entries = sorted(os.listdir(path))
         except PermissionError:
@@ -403,31 +460,26 @@ def list_directory():
 
         for name in entries:
             full_path = os.path.join(path, name)
-
             try:
                 st = os.stat(full_path)
                 is_dir = os.path.isdir(full_path)
-
                 files.append({
-                    "name": name,
-                    "path": full_path,
+                    "name":         name,
+                    "path":         full_path,
                     "is_directory": is_dir,
-                    "size": None if is_dir else st.st_size,
-                    "mtime": datetime.utcfromtimestamp(
-                        st.st_mtime
-                    ).isoformat() + "Z",
+                    "size":         None if is_dir else st.st_size,
+                    "mtime":        datetime.utcfromtimestamp(
+                                        st.st_mtime).isoformat() + "Z",
                 })
             except PermissionError:
-                # Skip unreadable entries silently
                 continue
             except FileNotFoundError:
-                # Race condition (deleted between list/stat)
                 continue
 
         return jsonify({
             "status": "success",
-            "type": "directory",
-            "files": files
+            "type":   "directory",
+            "files":  files,
         }), 200
 
     return jsonify({
@@ -520,6 +572,13 @@ def send_files():
         """
         Background thread: coordinate with remote /prepare_receive, then invoke
         the MsQuic sender binary once per file via quic_cli.send_file_cli().
+
+        Error strategy
+        ──────────────
+        • Transport error (can't reach /prepare_receive) → abort entire task.
+        • File-level error (503 busy, bad CLI exit, exception) → mark that file
+          as failed, continue with the remaining files.  This prevents a single
+          bad file from locking up the whole folder transfer.
         """
         try:
             print(f"[send_files] Starting background transfer to {remote_host}:{port}")
@@ -527,18 +586,17 @@ def send_files():
             print(f"[send_files] Folder files: {len(folder_file_map)} files from directories")
             print(f"[send_files] dest_dir: {dest_dir}")
 
-            # Combine regular files and folder files into one flat list with
-            # (abs_path, rel_path_or_None) so we iterate uniformly.
             all_files = (
                 [(f, None) for f in valid_files] +
                 [(abs_p, rel_p) for abs_p, rel_p in folder_file_map]
             )
 
-            total_size = sum(os.path.getsize(f) for f, _ in all_files if os.path.isfile(f))
+            total_size      = sum(os.path.getsize(f) for f, _ in all_files if os.path.isfile(f))
             bytes_sent_total = 0
+            transport_error  = None   # set to error string on unrecoverable network failure
 
             for file_path, rel_path in all_files:
-                filename = rel_path if rel_path else os.path.basename(file_path)
+                filename  = rel_path if rel_path else os.path.basename(file_path)
                 file_size = os.path.getsize(file_path)
 
                 with _transfer_lock:
@@ -547,7 +605,7 @@ def send_files():
 
                 print(f"[send_files] [{time.asctime()}] Preparing remote receiver for: {filename}")
 
-                # ── Step 1: Ask remote peer to start its receiver subprocess ──────
+                # ── Step 1: Ask remote peer to start its receiver ──────────────
                 try:
                     prep_resp = requests.post(
                         f"http://{remote_host}:5000/prepare_receive",
@@ -559,54 +617,115 @@ def send_files():
                         timeout=20,
                     )
                 except requests.RequestException as e:
-                    raise RuntimeError(f"Could not reach /prepare_receive on {remote_host}: {e}")
+                    # Can't reach the remote at all — abort entire transfer.
+                    transport_error = f"Cannot reach /prepare_receive on {remote_host}: {e}"
+                    print(f"[send_files] TRANSPORT ERROR: {transport_error}")
+                    break
 
                 if prep_resp.status_code == 503:
-                    raise RuntimeError(
-                        f"Remote peer busy (port in use). Try again shortly. "
-                        f"Response: {prep_resp.text[:200]}"
-                    )
-                if prep_resp.status_code != 200:
-                    raise RuntimeError(
-                        f"/prepare_receive failed ({prep_resp.status_code}): {prep_resp.text[:200]}"
-                    )
+                    # Remote busy — this file fails, try next.
+                    print(f"[send_files] Remote busy for '{filename}' (503) — skipping")
+                    _mark_file_done(task_id, filename, False)
+                    continue
 
-                prep_info   = prep_resp.json()
-                quic_port   = int(prep_info.get("receiver_port", port))
+                if prep_resp.status_code != 200:
+                    print(f"[send_files] prepare_receive error {prep_resp.status_code} "
+                          f"for '{filename}' — skipping. Response: {prep_resp.text[:120]}")
+                    _mark_file_done(task_id, filename, False)
+                    continue
+
+                prep_info = prep_resp.json()
+                quic_port = int(prep_info.get("receiver_port", port))
 
                 print(
                     f"[send_files] Remote receiver ready on port {quic_port} "
                     f"→ {prep_info.get('save_path', '?')}"
                 )
 
-                # ── Step 2: Brief pause so remote receiver subprocess can bind ────
-                time.sleep(0.5)
+                # ── Step 2: Wait for remote receiver to bind ───────────────────
+                # Minimum grace period for the receiver process to open its UDP port.
+                time.sleep(0.3)
 
-                # ── Step 3: Invoke MsQuic sender binary ──────────────────────────
+                # ── Step 3: Invoke MsQuic sender binary ────────────────────────
                 print(f"[send_files] [{time.asctime()}] Invoking sender binary for: {file_path}")
-                ok = send_file_cli(
-                    file_path,
-                    remote_host=remote_host,
-                    remote_port=quic_port,
-                )
-                if not ok:
-                    raise RuntimeError(
-                        f"MsQuic sender binary returned non-zero for: {file_path}"
+                try:
+                    ok = send_file_cli(
+                        file_path,
+                        remote_host=remote_host,
+                        remote_port=quic_port,
                     )
+                except Exception as exc:
+                    print(f"[send_files] Exception sending '{filename}': {exc}")
+                    ok = False
 
-                bytes_sent_total += file_size
-                _update_transfer_progress(task_id, bytes_sent_total, total_size)
-                print(f"[send_files] [{time.asctime()}] File sent: {filename}")
+                _mark_file_done(task_id, filename, ok)
 
-            print(f"[send_files] All files sent, marking task complete")
-            _complete_transfer_task(task_id, True)
+                if ok:
+                    bytes_sent_total += file_size
+                    _update_transfer_progress(task_id, bytes_sent_total, total_size)
+                    print(f"[send_files] [{time.asctime()}] ✓ Sent: {filename}")
+                else:
+                    print(f"[send_files] [{time.asctime()}] ✗ Failed: {filename}")
+
+                # ── Step 4: Wait for remote port to fully release ──────────────
+                # The receiver C binary does MsQuic teardown after the sender
+                # disconnects (~300 ms + OS port release). If we immediately call
+                # /prepare_receive for the next file we get 503 "port busy" and
+                # skip the file. Poll until the remote reports port is free.
+                _port_free = False
+                _port_deadline = time.time() + 8   # max 8 s between files
+                while time.time() < _port_deadline:
+                    try:
+                        _probe = requests.post(
+                            f"http://{remote_host}:5000/prepare_receive",
+                            json={"filename": "__port_probe__",
+                                  "filesize": 0, "probe": True},
+                            timeout=3,
+                        )
+                        if _probe.status_code != 503:
+                            _port_free = True
+                            break   # port is free
+                    except requests.RequestException:
+                        _port_free = True
+                        break   # can't reach remote — let next iteration handle
+                    time.sleep(0.4)
+                if not _port_free:
+                    print(f"[send_files] Port still busy after 8s — continuing anyway")
+
+            # ── After the loop: decide overall task outcome ────────────────────
+            if transport_error:
+                _complete_transfer_task(task_id, False, transport_error)
+            else:
+                with _transfer_lock:
+                    task_snap = _transfer_tasks.get(task_id, {})
+                failed = task_snap.get("failed_files", [])
+                done   = task_snap.get("completed_files", [])
+
+                if not done and failed:
+                    # Every file failed
+                    _complete_transfer_task(
+                        task_id, False,
+                        f"All {len(failed)} file(s) failed: {', '.join(failed[:3])}"
+                        + (" ..." if len(failed) > 3 else "")
+                    )
+                elif failed:
+                    # Partial success
+                    _complete_transfer_task(
+                        task_id, True,
+                        f"Partial: {len(done)} sent, {len(failed)} failed: "
+                        + ", ".join(failed[:3]) + (" ..." if len(failed) > 3 else "")
+                    )
+                else:
+                    print(f"[send_files] All {len(done)} file(s) sent successfully.")
+                    _complete_transfer_task(task_id, True)
 
         except Exception as e:
             import traceback
             error_msg = str(e) or f"{type(e).__name__}: (no message)"
-            print(f"[send_files] Transfer error: {error_msg}")
+            print(f"[send_files] Unexpected transfer error: {error_msg}")
             traceback.print_exc()
             _complete_transfer_task(task_id, False, error_msg)
+
 
     # Start transfer in background thread
     thread = threading.Thread(target=_do_send_background, daemon=True)
@@ -673,34 +792,40 @@ def transfer_status(task_id):
 
     # ── Failsafe: if the sender thread already marked this completed or failed,
     # return immediately — do NOT recalculate anything from time estimates.
-    # With MsQuic CLI, send_file_cli() blocks and returns only when the binary
-    # exits, so 'completed' is ground truth: the file is on the remote disk.
     if task["status"] in ("completed", "failed"):
         return jsonify({
-            "status":             task["status"],
-            "progress":           task["progress"],
-            "total_size":         task["total_size"],
-            "transferred":        task["transferred"],
-            "files":              task["files"],
-            "current_file":       task.get("current_file"),
-            "error":              task["error"],
+            "status":           task["status"],
+            "progress":         task["progress"],
+            "total_size":       task["total_size"],
+            "transferred":      task["transferred"],
+            "files":            task["files"],
+            "current_file":     task.get("current_file"),
+            "error":            task["error"],
             "estimated_duration": task.get("estimated_duration", 0),
-            "elapsed":            time.time() - task.get("start_time", time.time()),
+            "elapsed":          time.time() - task.get("start_time", time.time()),
+            # ── Per-file tracking ──
+            "total_files":      task.get("total_files", len(task["files"])),
+            "completed_count":  task.get("completed_count", 0),
+            "completed_files":  task.get("completed_files", []),
+            "failed_files":     task.get("failed_files", []),
         }), 200
 
-    # ── In-progress: use real byte-ratio progress stored by _update_transfer_progress.
-    # Do NOT recalculate from elapsed time — MsQuic is orders of magnitude faster
-    # than the old aioquic estimate, making time-based progress always wrong.
+    # ── In-progress ─────────────────────────────────────────────────────────
     return jsonify({
-        "status":             task["status"],
-        "progress":           task["progress"],   # set by _update_transfer_progress (bytes/total)
-        "total_size":         task["total_size"],
-        "transferred":        task["transferred"],
-        "files":              task["files"],
-        "current_file":       task.get("current_file"),
-        "error":              task["error"],
+        "status":           task["status"],
+        "progress":         task["progress"],
+        "total_size":       task["total_size"],
+        "transferred":      task["transferred"],
+        "files":            task["files"],
+        "current_file":     task.get("current_file"),
+        "error":            task["error"],
         "estimated_duration": task.get("estimated_duration", 0),
-        "elapsed":            time.time() - task.get("start_time", time.time()),
+        "elapsed":          time.time() - task.get("start_time", time.time()),
+        # ── Per-file tracking (live-updated by _mark_file_done) ──
+        "total_files":      task.get("total_files", len(task["files"])),
+        "completed_count":  task.get("completed_count", 0),
+        "completed_files":  task.get("completed_files", []),
+        "failed_files":     task.get("failed_files", []),
     }), 200
 
 
@@ -1205,23 +1330,33 @@ def prepare_receive():
     parent = os.path.dirname(save_path)
     os.makedirs(parent, exist_ok=True)
 
-    # ── Port availability check ───────────────────────────────────────────────
+    # ── Probe-only mode ───────────────────────────────────────────────────────
+    # When probe=True the caller just wants to know if the port is free.
+    # Returns 200 (free) or 503 (busy) without spawning any subprocess.
+    is_probe = bool(data.get("probe", False))
+
+    # ── Port availability check + optional receiver spawn (atomic under lock) ──
     from app_config import get_config, AppConfig
     config    = get_config()
     quic_port = config.port or AppConfig.QUIC_PORT
 
+    spawned_proc = None
     with _receiver_lock:
         # Clean up any receiver processes that have already exited
         for p in list(_active_receivers.keys()):
-            proc = _active_receivers[p]
-            if proc.poll() is not None:   # process has exited
+            if _active_receivers[p].poll() is not None:
                 _active_receivers.pop(p, None)
 
         if quic_port in _active_receivers:
+            # Port still held by a live receiver
             return jsonify({
                 "status": "error",
-                "message": f"QUIC port {quic_port} is already in use by an active transfer. Retry shortly."
+                "message": f"QUIC port {quic_port} is already in use. Retry shortly."
             }), 503
+
+        if is_probe:
+            # Probe only — port is free, no need to spawn
+            return jsonify({"status": "free", "receiver_port": quic_port}), 200
 
         # ── Spawn c_ver/receiver subprocess ──────────────────────────────────
         print(
@@ -1229,12 +1364,12 @@ def prepare_receive():
             f"({filesize} bytes) → {save_path}"
         )
         try:
-            proc = start_receiver_cli(save_path=save_path, port=quic_port)
+            spawned_proc = start_receiver_cli(save_path=save_path, port=quic_port)
         except Exception as e:
             print(f"[prepare_receive] Failed to start receiver: {e}")
             return jsonify({"status": "error", "message": str(e)}), 500
 
-        _active_receivers[quic_port] = proc
+        _active_receivers[quic_port] = spawned_proc
 
     # Spawn a watcher thread that removes the entry once the receiver exits
     def _watch_receiver(p, proc):
@@ -1244,7 +1379,7 @@ def prepare_receive():
         print(f"[prepare_receive] Receiver on port {p} exited (returncode={proc.returncode})")
 
     threading.Thread(
-        target=_watch_receiver, args=(quic_port, proc), daemon=True
+        target=_watch_receiver, args=(quic_port, spawned_proc), daemon=True
     ).start()
 
     return jsonify({
