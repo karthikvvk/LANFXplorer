@@ -180,6 +180,25 @@ class FileSystemProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Silently refresh the local file list (no loading spinner, preserves selection).
+  /// Called by the periodic auto-refresh timer in MainPage.
+  Future<void> silentRefreshLocal() async {
+    final svc = _apiService;
+    if (_isLoadingLocal || svc == null) return;
+    try {
+      final fresh = await svc.getFiles(_localCurrentPath);
+      // Re-apply selection to new snapshot
+      final selectedPaths = {for (final f in _localFiles) if (f.isSelected) f.path};
+      _localFiles = fresh
+          .map((f) => f.copyWith(isSelected: selectedPaths.contains(f.path)))
+          .toList();
+      _localError = null;
+      notifyListeners();
+    } catch (_) {
+      // Silent fail — don't flash error for background refresh
+    }
+  }
+
   void toggleLocalFileSelection(int index) {
     _localFiles[index] =
         _localFiles[index].copyWith(isSelected: !_localFiles[index].isSelected);

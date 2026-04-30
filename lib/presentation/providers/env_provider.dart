@@ -62,8 +62,23 @@ class EnvProvider extends ChangeNotifier {
     if (_env == null) return;
     _env = _env!.copyWith(outDir: outDir);
     notifyListeners();
-
     await EnvWriter.setValue('OUTDIR', outDir);
+  }
+
+  /// Update the source directory
+  Future<void> updateSrcDir(String srcDir) async {
+    if (_env == null) return;
+    _env = _env!.copyWith(srcDir: srcDir);
+    notifyListeners();
+    await EnvWriter.setValue('SRCDIR', srcDir);
+  }
+
+  /// Update the active network interface
+  Future<void> updateInterface(String iface) async {
+    if (_env == null) return;
+    _env = _env!.copyWith(interface: iface);
+    notifyListeners();
+    await EnvWriter.setValue('INTERFACE', iface);
   }
 
   /// Logout user by clearing PASSWORD from .env

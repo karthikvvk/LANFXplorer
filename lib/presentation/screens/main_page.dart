@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:lanfxplorer/core/utils/logger.dart';
 import 'package:lanfxplorer/data/models/file_item.dart';
 import 'package:lanfxplorer/data/services/api_service.dart';
@@ -5,11 +7,11 @@ import 'package:lanfxplorer/presentation/components/drag_drop_zone.dart';
 import 'package:lanfxplorer/presentation/components/file_item_card.dart';
 import 'package:lanfxplorer/presentation/components/theme_toggle_button.dart';
 import 'package:lanfxplorer/presentation/components/transfer_status_widget.dart';
-import 'package:lanfxplorer/presentation/dialogs/troubleshoot_dialog.dart';
 import 'package:lanfxplorer/presentation/providers/env_provider.dart';
 import 'package:lanfxplorer/presentation/providers/file_system_provider.dart';
 import 'package:lanfxplorer/presentation/providers/session_provider.dart';
 import 'package:lanfxplorer/presentation/providers/transfer_provider.dart';
+import 'package:lanfxplorer/nav.dart';
 import 'package:lanfxplorer/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -24,6 +26,8 @@ class MainPage extends StatefulWidget {
 }
 
 class _MainPageState extends State<MainPage> {
+  Timer? _localRefreshTimer;
+
   @override
   void initState() {
     super.initState();
@@ -50,7 +54,18 @@ class _MainPageState extends State<MainPage> {
         null, // Let provider fetch remote default path
         destIp,
       );
+
+      // ── Real-time local dir polling (host side only) ─────────────────────
+      _localRefreshTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+        context.read<FileSystemProvider>().silentRefreshLocal();
+      });
     });
+  }
+
+  @override
+  void dispose() {
+    _localRefreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _onSendToDest() async {
@@ -125,43 +140,11 @@ class _MainPageState extends State<MainPage> {
     context.go('/home');
   }
 
-  void _onLogout() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Sign Out'),
-        content: const Text('Are you sure you want to sign out?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Sign Out'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true && mounted) {
-      await context.read<EnvProvider>().logout();
-      context.read<SessionProvider>().endSession();
-      if (mounted) {
-        context.go('/');
-      }
-    }
-  }
-
   void _onReconnect() async {
     final session = context.read<SessionProvider>();
     final api = context.read<ApiService>();
-
     final ok = await session.reconnect(api);
-
-    _showSnackBar(
-      ok ? 'Reconnected successfully' : 'Server not reachable',
-    );
+    _showSnackBar(ok ? 'Reconnected successfully' : 'Server not reachable');
   }
 
   void _showSnackBar(String message, {bool isError = false}) {
@@ -182,15 +165,6 @@ class _MainPageState extends State<MainPage> {
       builder: (context) => SizedBox(
         height: MediaQuery.of(context).size.height * 0.7,
         child: const TransferHistorySheet(),
-      ),
-    );
-  }
-
-  void _showTroubleshoot() {
-    showDialog(
-      context: context,
-      builder: (context) => TroubleshootDialog(
-        apiService: context.read<ApiService>(),
       ),
     );
   }
@@ -249,23 +223,11 @@ class _MainPageState extends State<MainPage> {
                   label: 'Fetch',
                   onPressed: _onFetchFromDest,
                 ),
-                // const SizedBox(width: AppSpacing.xs),
-                // _ToolbarButton(
-                //   icon: Icons.refresh,
-                //   label: 'Reconnect',
-                //   onPressed: _onReconnect,
-                // ),
                 const SizedBox(width: AppSpacing.xs),
                 _ToolbarButton(
                   icon: Icons.history,
                   label: '',
                   onPressed: _showTransferHistory,
-                ),
-                const SizedBox(width: AppSpacing.xs),
-                _ToolbarButton(
-                  icon: Icons.error,
-                  label: '',
-                  onPressed: _showTroubleshoot,
                 ),
                 const SizedBox(width: AppSpacing.xs),
                 _ToolbarButton(
@@ -275,10 +237,9 @@ class _MainPageState extends State<MainPage> {
                 ),
                 const SizedBox(width: AppSpacing.xs),
                 _ToolbarButton(
-                  icon: Icons.logout,
-                  label: 'Sign Out',
-                  onPressed: _onLogout,
-                  isDestructive: true,
+                  icon: Icons.settings_rounded,
+                  label: 'Settings',
+                  onPressed: () => context.push(AppRoutes.settings),
                 ),
                 const SizedBox(width: AppSpacing.sm),
                 const ThemeToggleButton(),
@@ -338,43 +299,37 @@ class _ToolbarButton extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onPressed;
-  final bool isDestructive;
 
   const _ToolbarButton({
     required this.icon,
     required this.label,
     required this.onPressed,
-    this.isDestructive = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final buttonColor = isDestructive ? colorScheme.error : colorScheme.primary;
 
     final style = OutlinedButton.styleFrom(
-      padding: EdgeInsets.symmetric(
-        horizontal: label.isEmpty ? AppSpacing.md : AppSpacing.md,
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
         vertical: AppSpacing.sm,
       ),
-      side: BorderSide(
-          color: isDestructive
-              ? colorScheme.error.withValues(alpha: 0.5)
-              : colorScheme.outline.withValues(alpha: 0.3)),
+      side: BorderSide(color: colorScheme.outline.withValues(alpha: 0.3)),
     );
 
     if (label.isEmpty) {
       return OutlinedButton(
         onPressed: onPressed,
         style: style,
-        child: Icon(icon, size: 18, color: buttonColor),
+        child: Icon(icon, size: 18, color: colorScheme.primary),
       );
     }
 
     return OutlinedButton.icon(
       onPressed: onPressed,
-      icon: Icon(icon, size: 18, color: buttonColor),
-      label: Text(label, style: TextStyle(color: buttonColor)),
+      icon: Icon(icon, size: 18, color: colorScheme.primary),
+      label: Text(label, style: TextStyle(color: colorScheme.primary)),
       style: style,
     );
   }

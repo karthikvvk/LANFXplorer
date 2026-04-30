@@ -388,10 +388,118 @@ class ApiService {
     }
   }
 
+  /// Check GitHub for a newer version. Returns null on network error.
+  Future<Map<String, dynamic>?> checkUpdate() async {
+    try {
+      final response = await _client
+          .get(Uri.parse('${ApiEndpoints.baseUrl}/update/check'))
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) return jsonDecode(response.body) as Map<String, dynamic>;
+      return null;
+    } catch (e) {
+      AppLogger.error('checkUpdate error: $e');
+      return null;
+    }
+  }
+
+  /// Apply the latest update (download → extract → copy → pip upgrade).
+  /// Long-running — may take 30–120 s depending on repo size and network.
+  Future<Map<String, dynamic>> applyUpdate() async {
+    try {
+      final response = await _client
+          .post(Uri.parse('${ApiEndpoints.baseUrl}/update/apply'))
+          .timeout(const Duration(seconds: 180));
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (e) {
+      AppLogger.error('applyUpdate error: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  /// Store a new password in the OS keyring via the backend.
+  Future<bool> setPassword(String password) async {
+    try {
+      final response = await _client
+          .post(
+            Uri.parse('${ApiEndpoints.baseUrl}/set_password'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'password': password}),
+          )
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['success'] == true;
+      }
+      return false;
+    } catch (e) {
+      AppLogger.error('setPassword error: $e');
+      return false;
+    }
+  }
+
+  /// Get usable network interfaces (excludes lo).
+  Future<List<Map<String, dynamic>>> getInterfaces() async {
+    try {
+      final response = await _client
+          .get(Uri.parse('${ApiEndpoints.baseUrl}/interfaces'))
+          .timeout(const Duration(seconds: 5));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return List<Map<String, dynamic>>.from(data['interfaces'] ?? []);
+      }
+      return [];
+    } catch (e) {
+      AppLogger.error('getInterfaces error: $e');
+      return [];
+    }
+  }
+
+  /// Switch the active network interface.
+  Future<bool> setInterface(String interface) async {
+    try {
+      final response = await _client
+          .post(
+            Uri.parse('${ApiEndpoints.baseUrl}/set_interface'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'interface': interface}),
+          )
+          .timeout(const Duration(seconds: 5));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['success'] == true;
+      }
+      return false;
+    } catch (e) {
+      AppLogger.error('setInterface error: $e');
+      return false;
+    }
+  }
+
+  /// Update OUTDIR and/or SRCDIR on the backend.
+  Future<bool> updateDirs({String? outDir, String? srcDir}) async {
+    try {
+      final body = <String, dynamic>{};
+      if (outDir != null && outDir.isNotEmpty) body['outdir'] = outDir;
+      if (srcDir != null && srcDir.isNotEmpty) body['srcdir'] = srcDir;
+      final response = await _client
+          .post(
+            Uri.parse('${ApiEndpoints.baseUrl}/set_dirs'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 5));
+      return response.statusCode == 200;
+    } catch (e) {
+      AppLogger.error('updateDirs error: $e');
+      return false;
+    }
+  }
+
   void dispose() {
     _client.close();
   }
 }
+
 
 /// Result of handshake operation
 class HandshakeResult {

@@ -1444,7 +1444,254 @@ def prepare_receive():
     }), 200
 
 
+@app.route('/interfaces', methods=['GET'])
+def get_interfaces():
+    """Return usable network interfaces (excluding loopback lo)."""
+    try:
+        result = subprocess.run(
+            ['ip', '-o', 'link', 'show'],
+            capture_output=True, text=True, timeout=5
+        )
+        env      = load_env_vars()
+        current  = env.get('interface', '')
+        ifaces   = []
+        for line in result.stdout.split('\n'):
+            if not line.strip():
+                continue
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            iface = parts[1].rstrip(':')
+            if iface == 'lo':
+                continue
+            ifaces.append({'name': iface, 'active': iface == current})
+        return jsonify({'interfaces': ifaces, 'current': current}), 200
+    except Exception as e:
+        return jsonify({'interfaces': [], 'error': str(e)}), 200
+
+
+@app.route('/set_interface', methods=['POST'])
+def set_interface():
+    """Switch active network interface (writes INTERFACE to .env)."""
+    try:
+        data      = request.get_json() or {}
+        interface = data.get('interface', '').strip()
+        if not interface:
+            return jsonify({'success': False, 'error': 'interface is required'}), 400
+        if interface == 'lo':
+            return jsonify({'success': False, 'error': 'Cannot use loopback interface'}), 400
+
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+        lines, found = [], False
+        if os.path.exists(env_path):
+            with open(env_path, 'r') as f:
+                for line in f:
+                    if line.startswith('INTERFACE='):
+                        lines.append(f'INTERFACE={interface}\n')
+                        found = True
+                    else:
+                        lines.append(line)
+        if not found:
+            lines.append(f'INTERFACE={interface}\n')
+        with open(env_path, 'w') as f:
+            f.writelines(lines)
+
+        print(f'[set_interface] Switched to: {interface}')
+        return jsonify({'success': True, 'interface': interface}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/set_dirs', methods=['POST'])
+def set_dirs():
+    """Update OUTDIR and/or SRCDIR in .env."""
+    try:
+        data     = request.get_json() or {}
+        out_dir  = data.get('outdir', '').strip()
+        src_dir  = data.get('srcdir', '').strip()
+
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+        lines = []
+        found_out, found_src = False, False
+        if os.path.exists(env_path):
+            with open(env_path, 'r') as f:
+                for line in f:
+                    if out_dir and line.startswith('OUTDIR='):
+                        lines.append(f'OUTDIR={out_dir}\n')
+                        found_out = True
+                    elif src_dir and line.startswith('SRCDIR='):
+                        lines.append(f'SRCDIR={src_dir}\n')
+                        found_src = True
+                    else:
+                        lines.append(line)
+        if out_dir and not found_out:
+            lines.append(f'OUTDIR={out_dir}\n')
+        if src_dir and not found_src:
+            lines.append(f'SRCDIR={src_dir}\n')
+        with open(env_path, 'w') as f:
+            f.writelines(lines)
+
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/update/check', methods=['GET'])
+def update_check():
+    """Compare local .version SHA with latest commit on GitHub."""
+    import urllib.request as _ureq
+    try:
+        app_dir   = os.path.dirname(os.path.abspath(__file__))
+        ver_file  = os.path.join(app_dir, '.version')
+        local_sha = 'dev'
+        if os.path.exists(ver_file):
+            with open(ver_file) as f:
+                local_sha = f.read().strip() or 'dev'
+
+        owner, repo, branch = 'karthikvvk', 'LANFXplorer', 'main'
+        env   = load_env_vars()
+        token = env.get('github_token', '') or os.environ.get('GITHUB_TOKEN', '')
+
+        hdrs = {'Accept': 'application/vnd.github.v3+json',
+                'User-Agent': 'LANFXplorer-Updater'}
+        if token:
+            hdrs['Authorization'] = f'token {token}'
+
+        api_url = f'https://api.github.com/repos/{owner}/{repo}/commits/{branch}'
+        req = _ureq.Request(api_url, headers=hdrs)
+        with _ureq.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+
+        latest_sha  = data['sha']
+        commit_msg  = data['commit']['message'].split('\n')[0]
+        commit_date = data['commit']['committer']['date']
+
+        return jsonify({
+            'is_latest':      local_sha == latest_sha,
+            'local_sha':      local_sha,
+            'latest_sha':     latest_sha,
+            'short_local':    local_sha[:8] if local_sha != 'dev' else 'dev',
+            'short_latest':   latest_sha[:8],
+            'commit_message': commit_msg,
+            'commit_date':    commit_date,
+        }), 200
+    except Exception as e:
+        print(f'[update/check] error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/update/apply', methods=['POST'])
+def update_apply():
+    """
+    Smart update flow:
+      1. Download tarball from GitHub
+      2. Extract to update/
+      3. Copy safe files to app root (skip .env, certs/, virtual/, update/, .version)
+      4. pip install --upgrade -r requirements.txt inside virtual/
+      5. Write new SHA to .version
+      6. Cleanup (delete update/ and temp archive)
+    """
+    import urllib.request as _ureq
+    import tarfile, shutil
+
+    app_dir     = os.path.dirname(os.path.abspath(__file__))
+    update_dir  = os.path.join(app_dir, 'update')
+    archive_tmp = os.path.join(app_dir, '_update_dl.tar.gz')
+
+    owner, repo, branch = 'karthikvvk', 'LANFXplorer', 'main'
+    env   = load_env_vars()
+    token = env.get('github_token', '') or os.environ.get('GITHUB_TOKEN', '')
+
+    hdrs = {'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'LANFXplorer-Updater'}
+    if token:
+        hdrs['Authorization'] = f'token {token}'
+
+    # Files/dirs that must never be overwritten during an update
+    SKIP = {'.env', 'certs', 'update', 'virtual', '__pycache__',
+            '.version', 'peer_store.json', 'logs'}
+
+    try:
+        # ── Step 1: Download tarball ──────────────────────────────────────
+        tarball_url = f'https://api.github.com/repos/{owner}/{repo}/tarball/{branch}'
+        print(f'[update] Downloading {tarball_url}')
+        req = _ureq.Request(tarball_url, headers=hdrs)
+        with _ureq.urlopen(req, timeout=120) as resp:
+            with open(archive_tmp, 'wb') as fh:
+                fh.write(resp.read())
+        print(f'[update] Download complete → {archive_tmp}')
+
+        # ── Step 2: Extract to update/ ────────────────────────────────────
+        if os.path.exists(update_dir):
+            shutil.rmtree(update_dir)
+        os.makedirs(update_dir)
+        with tarfile.open(archive_tmp, 'r:gz') as tar:
+            tar.extractall(update_dir)
+
+        # GitHub extracts into owner-repo-<sha>/ subdir
+        subdirs = [d for d in os.listdir(update_dir)
+                   if os.path.isdir(os.path.join(update_dir, d))]
+        if not subdirs:
+            raise RuntimeError('Archive contained no top-level directory')
+        extracted_root = os.path.join(update_dir, subdirs[0])
+        print(f'[update] Extracted root: {extracted_root}')
+
+        # ── Step 3: Copy safe files to app_dir ───────────────────────────
+        for item in os.listdir(extracted_root):
+            if item in SKIP:
+                continue
+            src = os.path.join(extracted_root, item)
+            dst = os.path.join(app_dir, item)
+            if os.path.isdir(src):
+                if os.path.exists(dst):
+                    shutil.rmtree(dst)
+                shutil.copytree(src, dst)
+            else:
+                shutil.copy2(src, dst)
+        print('[update] Files copied to app directory')
+
+        # ── Step 4: pip upgrade ───────────────────────────────────────────
+        venv_pip     = os.path.join(app_dir, 'virtual', 'bin', 'pip')
+        requirements = os.path.join(app_dir, 'requirements.txt')
+        if os.path.isfile(venv_pip) and os.path.isfile(requirements):
+            print('[update] Upgrading pip packages…')
+            subprocess.run(
+                [venv_pip, 'install', '--upgrade', '-r', requirements],
+                capture_output=True, timeout=180,
+            )
+        else:
+            print('[update] Skipping pip upgrade (pip or requirements.txt not found)')
+
+        # ── Step 5: Fetch latest SHA and write .version ──────────────────
+        api_url = f'https://api.github.com/repos/{owner}/{repo}/commits/{branch}'
+        req2    = _ureq.Request(api_url, headers=hdrs)
+        with _ureq.urlopen(req2, timeout=10) as resp2:
+            sha_data   = json.loads(resp2.read().decode())
+        new_sha = sha_data['sha']
+        with open(os.path.join(app_dir, '.version'), 'w') as vf:
+            vf.write(new_sha)
+        print(f'[update] Version written: {new_sha[:8]}')
+
+        return jsonify({'success': True, 'sha': new_sha,
+                        'short': new_sha[:8]}), 200
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+    finally:
+        # ── Step 6: Cleanup ──────────────────────────────────────────────
+        if os.path.exists(archive_tmp):
+            os.remove(archive_tmp)
+        if os.path.exists(update_dir):
+            shutil.rmtree(update_dir)
+        print('[update] Cleanup done')
+
+
 if __name__ == "__main__":
+
+
     # start_peer_discovery()
     app.run(
         host="0.0.0.0",
