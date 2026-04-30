@@ -56,18 +56,23 @@ done
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # -------------------------------------------------
-# Verify system Python exists
+# Python: use venv absolute path — NO source activate needed.
+# Using the direct binary means sys.executable inside main.py
+# is the venv Python, so ALL child processes (startsetup.py,
+# receive.py, api_bridge.py) that use sys.executable also get
+# the venv Python automatically.
 # -------------------------------------------------
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "[✗] python3 not found. Please install Python 3.8+:"
-  echo "    sudo apt install python3 python3-pip   # Debian/Ubuntu"
-  echo "    sudo dnf install python3 python3-pip   # Fedora"
+VENV_PYTHON="$APP_DIR/virtual/bin/python"
+
+if [ -x "$VENV_PYTHON" ]; then
+  PYTHON="$VENV_PYTHON"
+else
+  # venv not yet built — must run install.sh first
+  echo "[✗] Virtual environment not found at: $VENV_PYTHON"
+  echo "    Run ./install.sh first to set up the environment."
   exit 1
 fi
 
-# -------------------------------------------------
-# Set up PYTHONPATH so local modules resolve
-# -------------------------------------------------
 export PYTHONPATH="$APP_DIR"
 
 # Source Cargo env if available (only needed on 32-bit for cryptography source build)
@@ -117,6 +122,6 @@ fi
 # -------------------------------------------------
 # Launch
 # -------------------------------------------------
-python3 "$APP_DIR/main.py"
+"$PYTHON" "$APP_DIR/main.py"
 EXIT_CODE=$?
 exit $EXIT_CODE

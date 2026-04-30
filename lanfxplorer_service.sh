@@ -24,21 +24,18 @@
 APP_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 
 # ------------------------------------------------------------------
-# Bundled Python & OpenSSL paths
+# Python: use venv absolute path — NO source activate needed.
+# Direct binary path → sys.executable inside main.py is the venv Python
+# → ALL child processes inherit the venv packages automatically.
 # ------------------------------------------------------------------
-# ------------------------------------------------------------------
-# Python: prefer venv (created by install.sh), fall back to system python3
-# ------------------------------------------------------------------
-VENV_DIR="$APP_DIR/virtual"
-if [ -x "$VENV_DIR/bin/python" ]; then
-  PYTHON="$VENV_DIR/bin/python"
+VENV_PYTHON="$APP_DIR/virtual/bin/python"
+
+if [ -x "$VENV_PYTHON" ]; then
+  PYTHON="$VENV_PYTHON"
 else
-  # venv not yet created (running before install?) — try system python3
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo "[lanfxplorer-svc] FATAL: no Python found. Run ./install.sh first." >&2
-    exit 1
-  fi
-  PYTHON="python3"
+  echo "[lanfxplorer-svc] FATAL: venv not found at $VENV_PYTHON" >&2
+  echo "[lanfxplorer-svc] Run ./install.sh first to create the virtual environment." >&2
+  exit 1
 fi
 
 export PYTHONPATH="$APP_DIR"

@@ -270,7 +270,7 @@ class _MainPageState extends State<MainPage> {
                 const SizedBox(width: AppSpacing.xs),
                 _ToolbarButton(
                   icon: Icons.exit_to_app,
-                  label: 'Exit',
+                  label: 'Disconnect',
                   onPressed: _onHome,
                 ),
                 const SizedBox(width: AppSpacing.xs),
