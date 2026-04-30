@@ -26,35 +26,21 @@ APP_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 # ------------------------------------------------------------------
 # Bundled Python & OpenSSL paths
 # ------------------------------------------------------------------
-PY_PREFIX="$APP_DIR/opt/python39"
-OPENSSL_PREFIX="$APP_DIR/opt/openssl"
-
-if [ -d "$OPENSSL_PREFIX/lib64" ] && [ ! -d "$OPENSSL_PREFIX/lib" ]; then
-  OPENSSL_LIB="$OPENSSL_PREFIX/lib64"
+# ------------------------------------------------------------------
+# Python: prefer venv (created by install.sh), fall back to system python3
+# ------------------------------------------------------------------
+VENV_DIR="$APP_DIR/virtual"
+if [ -x "$VENV_DIR/bin/python" ]; then
+  PYTHON="$VENV_DIR/bin/python"
 else
-  OPENSSL_LIB="$OPENSSL_PREFIX/lib"
+  # venv not yet created (running before install?) — try system python3
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "[lanfxplorer-svc] FATAL: no Python found. Run ./install.sh first." >&2
+    exit 1
+  fi
+  PYTHON="python3"
 fi
 
-if [ ! -x "$PY_PREFIX/bin/python3" ]; then
-  echo "[lanfxplorer-svc] FATAL: bundled Python not found at $PY_PREFIX" >&2
-  echo "[lanfxplorer-svc] Run ./install.sh first to complete installation." >&2
-  exit 1
-fi
-
-# Ensure the systemd working directory exists (belt-and-suspenders alongside ExecStartPre)
-mkdir -p "$HOME/.local/share/lanfxplorer-workdir" || true
-
-# ------------------------------------------------------------------
-# Set up environment
-# ------------------------------------------------------------------
-export PATH="$PY_PREFIX/bin:$PATH"
-
-case ":${LD_LIBRARY_PATH}:" in
-  *":$OPENSSL_LIB:"*) ;;
-  *) export LD_LIBRARY_PATH="$OPENSSL_LIB:$PY_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ;;
-esac
-
-export PYTHONHOME="$PY_PREFIX"
 export PYTHONPATH="$APP_DIR"
 
 # Headless mode: suppress Flutter / Tkinter UI launch inside main.py
@@ -103,7 +89,7 @@ echo "[lanfxplorer-svc] ============================================"
 echo "[lanfxplorer-svc] LANFXplorer Backend Service starting up"
 echo "[lanfxplorer-svc] PID: $$  |  $(date)"
 echo "[lanfxplorer-svc] APP_DIR: $APP_DIR"
-echo "[lanfxplorer-svc] Python: $PY_PREFIX/bin/python3"
+echo "[lanfxplorer-svc] Python:  $($PYTHON --version 2>&1)"
 echo "[lanfxplorer-svc] ============================================"
 
 # ------------------------------------------------------------------
@@ -111,4 +97,4 @@ echo "[lanfxplorer-svc] ============================================"
 # This runs startsetup → receive → api_bridge and blocks until
 # the service is stopped (SIGTERM from systemd).
 # ------------------------------------------------------------------
-exec "$PY_PREFIX/bin/python3" "$APP_DIR/main.py"
+exec "$PYTHON" "$APP_DIR/main.py"

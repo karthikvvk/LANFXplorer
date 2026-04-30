@@ -53,7 +53,7 @@ fi
 # System dependencies
 # (cmake + libmsquic-dev for MsQuic build; keyring for SecretStorage)
 # ===============================
-DEPS="python3 python3-pip curl cmake"
+DEPS="python3 curl cmake"
 
 install_deps() {
   echo "[+] Installing system dependencies: $DEPS + keyring backend"
@@ -74,13 +74,17 @@ install_deps() {
     sudo apk add $DEPS gnome-keyring libsecret-dev
   else
     echo "[!] No supported package manager found."
-    echo "    Please install manually: python3 python3-pip cmake gnome-keyring libsecret"
+    echo "    Please install manually: python3 cmake gnome-keyring libsecret"
+    echo "    (pip is NOT needed system-wide — the venv provides its own pip)"
     exit 1
   fi
 }
 
+# Only python3 itself needs to be present system-wide.
+# pip3 is intentionally excluded: modern distros (Arch, Ubuntu 23+) block
+# system-wide pip (PEP 668). The venv we create below has its own pip.
 MISSING=""
-for dep in python3 pip3 cmake; do
+for dep in python3 cmake; do
   if ! command -v "$dep" >/dev/null 2>&1; then
     MISSING="$MISSING $dep"
   fi
@@ -94,16 +98,31 @@ else
 fi
 
 # ===============================
+# ===============================
+# Create / reuse virtual environment
+# ===============================
+VENV_DIR="$APP_DIR/virtual"
+if [ ! -x "$VENV_DIR/bin/python" ]; then
+  echo "[+] Creating Python virtual environment: $VENV_DIR"
+  python3 -m venv "$VENV_DIR"
+  echo "[✓] Virtual environment created"
+else
+  echo "[✓] Virtual environment already exists"
+fi
+PYTHON="$VENV_DIR/bin/python"
+PIP="$VENV_DIR/bin/pip"
+
+# ===============================
 # pip + Python requirements
 # ===============================
 echo "[+] Upgrading pip and installing Python requirements"
-python3 -m pip install --upgrade pip
-python3 -m pip install -r "$APP_DIR/requirements.txt"
+"$PIP" install --upgrade pip
+"$PIP" install -r "$APP_DIR/requirements.txt"
 
 # Install dev requirements if present (optional developer extras)
 if [ -f "$APP_DIR/dev_requirements.txt" ]; then
   echo "[+] dev_requirements.txt found — installing dev extras"
-  python3 -m pip install -r "$APP_DIR/dev_requirements.txt"
+  "$PIP" install -r "$APP_DIR/dev_requirements.txt"
 else
   echo "[i] No dev_requirements.txt found — skipping dev extras"
 fi
@@ -132,7 +151,7 @@ fi
 # Firewall rules
 # ===============================
 echo "[+] Configuring firewall rules for LANFXplorer..."
-python3 "$APP_DIR/firewall_manager.py" --install || {
+"$PYTHON" "$APP_DIR/firewall_manager.py" --install || {
   echo "[!] Firewall configuration failed (non-fatal). You may need to manually allow ports."
 }
 
@@ -243,3 +262,5 @@ echo "║    Restart : ./install_service.sh --restart          ║"
 echo "║    Remove  : ./install_service.sh --remove           ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
+
+exec "$APP_DIR/app.sh"

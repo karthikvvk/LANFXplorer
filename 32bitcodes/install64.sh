@@ -53,7 +53,7 @@ fi
 # ===============================
 # System pip dependencies
 # ===============================
-DEPS="python3 python3-pip curl"
+DEPS="python3 curl"
 
 install_deps() {
   echo "[+] Installing system dependencies: $DEPS"
@@ -70,13 +70,37 @@ install_deps() {
     sudo apk add python3 py3-pip curl
   else
     echo "[!] No supported package manager found."
-    echo "    Please install manually: python3 python3-pip"
+    echo "    Please install manually: python3 curl"
+    echo "    (pip is NOT needed system-wide — the venv provides its own pip)"
     exit 1
   fi
 }
 
+
+
+# ===============================
+# ===============================
+# Create / reuse virtual environment
+# ===============================
+VENV_DIR="$APP_DIR/virtual"
+if [ ! -x "$VENV_DIR/bin/python" ]; then
+  echo "[+] Creating Python virtual environment: $VENV_DIR"
+  python3 -m venv "$VENV_DIR"
+  echo "[✓] Virtual environment created"
+else
+  echo "[✓] Virtual environment already exists"
+fi
+PYTHON="$VENV_DIR/bin/python"
+PIP="$VENV_DIR/bin/pip"
+
+
+
+
+# Only python3 needs to be present system-wide.
+# pip3 excluded: modern distros block system-wide pip (PEP 668).
+# The venv created below supplies its own pip via ensurepip.
 MISSING=""
-for dep in python3 pip3; do
+for dep in python3; do
   if ! command -v "$dep" >/dev/null 2>&1; then
     MISSING="$MISSING $dep"
   fi
@@ -86,20 +110,20 @@ if [ -n "$MISSING" ]; then
   echo "[!] Missing dependencies:$MISSING"
   install_deps
 else
-  echo "[✓] python3 and pip3 already present"
+  echo "[✓] python3 present (venv will supply pip)"
 fi
 
 # ===============================
 # pip + 64-bit requirements
 # ===============================
 echo "[+] Upgrading pip and installing 64-bit dependencies"
-python3 -m pip install --upgrade pip
-python3 -m pip install -r "$TESTING_DIR/requirements_64.txt"
+"$PIP" install --upgrade pip
+"$PIP" install -r "$TESTING_DIR/requirements_64.txt"
 
 # Install dev requirements if present (optional developer extras)
 if [ -f "$APP_DIR/dev_requirements.txt" ]; then
   echo "[+] dev_requirements.txt found — installing dev extras"
-  python3 -m pip install -r "$APP_DIR/dev_requirements.txt"
+  "$PIP" install -r "$APP_DIR/dev_requirements.txt"
 else
   echo "[i] No dev_requirements.txt found — skipping dev extras"
 fi
@@ -140,9 +164,10 @@ fi
 echo ""
 echo "================================================"
 echo "[✓] 64-bit Installation complete"
-echo "    Python: $(python3 --version)"
+echo "    Python: $($PYTHON --version)"
 echo "    cryptography: bundles own OpenSSL via cffi"
 echo "================================================"
 
 chmod +x "$APP_DIR/app.sh"
-"$APP_DIR/app.sh"
+# "$APP_DIR/app.sh"
+exec "$APP_DIR/app.sh"

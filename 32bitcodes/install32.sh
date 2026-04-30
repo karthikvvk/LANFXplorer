@@ -64,22 +64,23 @@ install_deps() {
  echo "[+] Installing system dependencies"
  if command -v apt-get >/dev/null 2>&1; then
    sudo apt-get update
-   sudo apt-get install -y python3 python3-pip curl libffi-dev zlib1g-dev ca-certificates
+   sudo apt-get install -y python3 curl libffi-dev zlib1g-dev ca-certificates
    # Multilib tools needed if cross-compiling on a 64-bit host
    if [ "$HOST_ARCH" = "x86_64" ]; then
      sudo apt-get install -y gcc-multilib g++-multilib libc6-dev-i386 || true
    fi
  elif command -v dnf >/dev/null 2>&1; then
-   sudo dnf install -y python3 python3-pip curl libffi-devel zlib-devel ca-certificates
+   sudo dnf install -y python3 curl libffi-devel zlib-devel ca-certificates
  elif command -v yum >/dev/null 2>&1; then
-   sudo yum install -y python3 python3-pip curl libffi-devel zlib-devel ca-certificates
+   sudo yum install -y python3 curl libffi-devel zlib-devel ca-certificates
  elif command -v pacman >/dev/null 2>&1; then
    sudo pacman -Sy --noconfirm python python-pip curl libffi zlib ca-certificates
  elif command -v apk >/dev/null 2>&1; then
    sudo apk add python3 py3-pip curl libffi-dev zlib-dev ca-certificates
  else
    echo "[!] No supported package manager found."
-   echo "    Please install manually: python3 python3-pip libffi-dev zlib1g-dev"
+   echo "    Please install manually: python3 libffi-dev zlib1g-dev"
+   echo "    (pip is NOT needed system-wide — the venv provides its own pip)"
    exit 1
  fi
 }
@@ -104,16 +105,31 @@ if [ "$HOST_ARCH" = "i686" ] || [ "$HOST_ARCH" = "i386" ]; then
 fi
 
 # ===============================
+# ===============================
+# Create / reuse virtual environment
+# ===============================
+VENV_DIR="$APP_DIR/virtual"
+if [ ! -x "$VENV_DIR/bin/python" ]; then
+  echo "[+] Creating Python virtual environment: $VENV_DIR"
+  python3 -m venv "$VENV_DIR"
+  echo "[✓] Virtual environment created"
+else
+  echo "[✓] Virtual environment already exists"
+fi
+PYTHON="$VENV_DIR/bin/python"
+PIP="$VENV_DIR/bin/pip"
+
+# ===============================
 # pip + 32-bit requirements
 # ===============================
 echo "[+] Upgrading pip and installing 32-bit dependencies"
-python3 -m pip install --upgrade pip
-python3 -m pip install -r "$TESTING_DIR/requirements_32.txt"
+"$PIP" install --upgrade pip
+"$PIP" install -r "$TESTING_DIR/requirements_32.txt"
 
 # Install dev requirements if present (optional developer extras)
 if [ -f "$APP_DIR/dev_requirements.txt" ]; then
   echo "[+] dev_requirements.txt found — installing dev extras"
-  python3 -m pip install -r "$APP_DIR/dev_requirements.txt"
+  "$PIP" install -r "$APP_DIR/dev_requirements.txt"
 else
   echo "[i] No dev_requirements.txt found — skipping dev extras"
 fi
@@ -159,4 +175,5 @@ echo "    cryptography: compiled from source (Rust)"
 echo "================================================"
 
 chmod +x "$APP_DIR/app.sh"
-"$APP_DIR/app.sh"
+# "$APP_DIR/app.sh"
+exec "$APP_DIR/app.sh"
