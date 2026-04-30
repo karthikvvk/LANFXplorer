@@ -39,13 +39,13 @@ pushd "%APP_DIR%"
 set "APP_DIR=%CD%"
 popd
 
-set "PY_PREFIX=%APP_DIR%\opt\python39"
-set "PYTHON_EXE=%PY_PREFIX%\python.exe"
+
+set "PYTHON_EXE=python"
 
 REM Verify Python exists
 if not exist "%PYTHON_EXE%" (
     echo [ERROR] Python not found at: %PYTHON_EXE%
-    echo         Please run 32bittesting\install32.bat first.
+    echo         Please run 32bitcodes\install32.bat first.
     pause
     exit /b 1
 )

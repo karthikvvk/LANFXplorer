@@ -52,30 +52,16 @@ done
 # -------------------------------------------------
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
-OPENSSL_PREFIX="$APP_DIR/opt/openssl"
-PY_PREFIX="$APP_DIR/opt/python39"
 
 # Detect lib vs lib64 for OpenSSL
-if [ -d "$OPENSSL_PREFIX/lib64" ] && [ ! -d "$OPENSSL_PREFIX/lib" ]; then
-  OPENSSL_LIB="$OPENSSL_PREFIX/lib64"
-else
-  OPENSSL_LIB="$OPENSSL_PREFIX/lib"
-fi
 
 # -------------------------------------------------
 # Set up Python environment
 # -------------------------------------------------
-export PATH="$PY_PREFIX/bin:$PATH"
-export LD_LIBRARY_PATH="$OPENSSL_LIB:$PY_PREFIX/lib:$LD_LIBRARY_PATH"
-export PYTHONHOME="$PY_PREFIX"
+export PYTHONPATH="$APP_DIR"
 export PYTHONPATH="$APP_DIR"
 
 # Verify Python exists
-if [ ! -x "$PY_PREFIX/bin/python3" ]; then
-  echo "[✗] Python not found at: $PY_PREFIX/bin/python3"
-  echo "    Run 32bittesting/install32.sh first."
-  exit 1
-fi
 
 # -------------------------------------------------
 # Force headless mode (skip UI in main.py)
@@ -131,4 +117,4 @@ echo ""
 # -------------------------------------------------
 # Launch (headless — main.py will skip UI)
 # -------------------------------------------------
-exec "$PY_PREFIX/bin/python3" "$APP_DIR/main.py"
+exec python3 "$APP_DIR/main.py"

@@ -1,86 +1,86 @@
-*.pem
-*.txt
-*.json
-send_files/
-received_files/
-dump/
-__pycache__/
-*.key
-.vscode/
-.agent/
-appbuild/
-pkica_export/
-# Miscellaneous
 *.class
+*.crt
+*.html
+*.json
+*.key
 *.log
-opt/
+*.map.json
+*.pcapng
+*.pem
 *.pyc
 *.swp
-.DS_Store
-.atom/
-*.peers_key
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
-dump/
-# IntelliJ related
+*.tar*
+*.txt
+*.zip*
+
+
+__pycache__/
+*.pyc
+
+
+.vscode/
+.idea/
 *.iml
 *.ipr
 *.iws
-.idea/
-LANFXplorer/
-reviewfiles/
-clipboard.txt
-*.pcapng
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
+.atom/
+.history
 
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
+
+.DS_Store
+
+
+appbuild/
+build/
+.build/
+.buildlog/
+dump/
+opt/
+reviewfiles/
+send_files/
+received_files/
+clipboard.txt
+migrate_working_dir/
+LANFXplorer/
+lanfxplorer
+
+
+*.peers_key
+
+
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
-.pub-cache/
 .pub/
-/build/
-# lanfXplorer
-# Symbolication related
-app.*.symbols
-
-# Obfuscation related
-app.*.map.json
-
-# Android Studio will place build artifacts here
+.pub-cache/
+**/doc/api/
+**/ios/Flutter/.last_build_id
 /android/app/debug
 /android/app/profile
 /android/app/release
 
-.prompt_attachments
-*.hologram.dart
-*.tar*
-*.zip*
-*.crt
-/virtual/
-*.html
-Notes.md
-lanfxplorer
+
 python_build/
 python_ui/
 
-32bitscreens/__pycache__/
-32bitscreens/dist/
-32bitscreens/build/
 
-# Ignore everything in c_ver/build/
+virtual/
+
+
+32bitscreens/__pycache__/
+32bitscreens/build/
+32bitscreens/dist/
+
 c_ver/build/*
-# But explicitly include the compiled binaries
+
+
+!requirements.txt
+!32bitcodes/requirements_64.txt
+!32bitcodes/requirements_32.txt
 !c_ver/build/sender
 !c_ver/build/receiver
 
-!requirements.txt
+
+.prompt_attachments
+*.hologram.dart
+Notes.md

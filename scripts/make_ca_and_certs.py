@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
-import asyncio
-import ssl
+"""
+LANFXplorer — Dev Script: Generate CA + Server/Client Certs
+
+Generates a local test CA and signs server + client certs for development.
+All crypto via the `cryptography` lib — no aioquic, no system openssl needed.
+
+Usage:
+    python3 scripts/make_ca_and_certs.py
+    # Certs are written to a temp directory; path printed on stdout.
+"""
+
 import os
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -14,10 +23,6 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
-
-from aioquic.asyncio import serve
-from aioquic.quic.configuration import QuicConfiguration
-from sender_api_functions import quic_connect, send_bytes, close_connection
 
 
 def make_ca_and_certs(tmpdir):
@@ -55,12 +60,10 @@ def make_ca_and_certs(tmpdir):
         .not_valid_before(datetime.now(timezone.utc))
         .not_valid_after(datetime.now(timezone.utc) + timedelta(days=365))
         .add_extension(
-            x509.SubjectAlternativeName(
-                [
-                    x509.DNSName(u"localhost"),
-                    x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
-                ]
-            ),
+            x509.SubjectAlternativeName([
+                x509.DNSName(u"localhost"),
+                x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+            ]),
             critical=False,
         )
         .sign(ca_key, hashes.SHA256())
@@ -80,98 +83,38 @@ def make_ca_and_certs(tmpdir):
         .sign(ca_key, hashes.SHA256())
     )
 
-    ca_p = os.path.join(tmpdir, 'ca.pem')
-    server_p = os.path.join(tmpdir, 'server.pem')
-    server_key_p = os.path.join(tmpdir, 'server-key.pem')
-    client_p = os.path.join(tmpdir, 'client.pem')
-    client_key_p = os.path.join(tmpdir, 'client-key.pem')
+    ca_p          = os.path.join(tmpdir, "ca.pem")
+    server_p      = os.path.join(tmpdir, "server.pem")
+    server_key_p  = os.path.join(tmpdir, "server-key.pem")
+    client_p      = os.path.join(tmpdir, "client.pem")
+    client_key_p  = os.path.join(tmpdir, "client-key.pem")
 
-    with open(ca_p, 'wb') as f:
+    with open(ca_p, "wb") as f:
         f.write(ca_cert.public_bytes(serialization.Encoding.PEM))
-    with open(server_p, 'wb') as f:
+    with open(server_p, "wb") as f:
         f.write(server_cert.public_bytes(serialization.Encoding.PEM))
-    with open(server_key_p, 'wb') as f:
-        f.write(server_key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption()))
-    with open(client_p, 'wb') as f:
+    with open(server_key_p, "wb") as f:
+        f.write(server_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption()))
+    with open(client_p, "wb") as f:
         f.write(client_cert.public_bytes(serialization.Encoding.PEM))
-    with open(client_key_p, 'wb') as f:
-        f.write(client_key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption()))
+    with open(client_key_p, "wb") as f:
+        f.write(client_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption()))
 
     return ca_p, server_p, server_key_p, client_p, client_key_p
 
 
-async def run_test():
+if __name__ == "__main__":
     tmpdir = tempfile.mkdtemp()
     ca_p, server_p, server_key_p, client_p, client_key_p = make_ca_and_certs(tmpdir)
-
-    config = QuicConfiguration(is_client=False, alpn_protocols=['file-transfer'])
-    config.load_cert_chain(server_p, server_key_p)
-    config.load_verify_locations(cafile=ca_p)
-    import ssl as sslmod
-    config.verify_mode = sslmod.CERT_REQUIRED
-
-    async def _stream_handler(reader, writer):
-        print('Stream handler invoked')
-        # try to show extra info
-        try:
-            info = writer.get_extra_info('ssl_object')
-            print('ssl_object:', info)
-            if info is not None:
-                try:
-                    der = info.getpeercert(binary_form=True)
-                    print('peer der len', len(der) if der else None)
-                except Exception as e:
-                    print('error getting peercert:', e)
-        except Exception as e:
-            print('get_extra_info failed:', e)
-
-        # Try helper that inspects the QUIC protocol/transport for peer cert
-        try:
-            from pki.utils import get_peer_cert_pem_from_writer, fingerprint_pem
-
-            pem = get_peer_cert_pem_from_writer(writer)
-            if pem:
-                print('peer cert PEM found, fingerprint:', fingerprint_pem(pem))
-            else:
-                print('no peer cert PEM extracted')
-        except Exception as e:
-            print('error extracting peer cert via helper:', e)
-        # read filename length
-        try:
-            raw = await reader.readexactly(2)
-            n = int.from_bytes(raw, 'big')
-            fname = (await reader.readexactly(n)).decode('utf-8')
-            print('fname:', fname)
-            raw = await reader.readexactly(8)
-            size = int.from_bytes(raw, 'big')
-            data = await reader.readexactly(size)
-            print('received data len', len(data))
-            writer.write(b'OK')
-            await writer.drain()
-        except Exception as e:
-            print('stream handler exception:', e)
-
-    def stream_handler(reader, writer):
-        # Spawn the coroutine to handle the stream (avoid "coroutine was never awaited")
-        asyncio.create_task(_stream_handler(reader, writer))
-
-    server = await serve(host='127.0.0.1', port=4434, configuration=config, stream_handler=stream_handler)
-    print('server started')
-
-    # create client and send a small payload
-    conn = await quic_connect(host='127.0.0.1', port=4434, insecure=False, client_cert=client_p, client_key=client_key_p, ca_cert=ca_p)
-    print('client connected')
-    await send_bytes(conn, b'hello', filename_hint='test.txt')
-    await close_connection(conn)
-
-    server.close()
-    # Some aioquic versions provide `wait_closed()`, others do not.
-    try:
-        await server.wait_closed()
-    except AttributeError:
-        # fallback: give the loop a moment to clean up
-        await asyncio.sleep(0.1)
-
-
-if __name__ == '__main__':
-    asyncio.run(run_test())
+    print(f"[✓] Certs written to: {tmpdir}")
+    print(f"    CA         : {ca_p}")
+    print(f"    Server cert: {server_p}")
+    print(f"    Server key : {server_key_p}")
+    print(f"    Client cert: {client_p}")
+    print(f"    Client key : {client_key_p}")

@@ -29,44 +29,48 @@ except:
 
 # Files and directories to include
 ITEMS = [
-    "analysis_options.yaml",
-    "pki",
-    "c_ver",
-    "quic_cli.py",
-    "cli_profile.py",
-    "logout.py",
-    "api_bridge.py",
-    "pubspec.lock",
-    "app.sh",
-    "app.bat",  # Windows launcher
-    "pubspec.yaml",
-    "receiver_api_functions.py",
-    "config_manager.py",
-    "receive.py",
-    "devtools_options.yaml",
-    "requirements.txt",
-    "scanner.py",
-    "host_selecter.py",
-    "scripts",
-    "installer.py",
-    "sender_api_functions.py",
-    "install.sh",
-    "install.bat",  # Windows installer
-    "send.py",
-    "lanfxplorery.png",
-    "startsetup.py",
-    "main.py",
-    "wifi_speed.py",
-    "path_security.py",
-    "app_config.py",
-    "set_static_ip.py",
-    "reset_env.py",
-    "show_config.py",
     "32bitscreens",
-    "firewall_manager.py",
-    "install.py",
+    "c_ver",
+    "pki",
+    "scripts",
 
-    
+    "analysis_options.yaml",
+    "api_bridge.py",
+    "app.sh",
+    "app_config.py",
+    "cli_profile.py",
+    "config_manager.py",
+    "devtools_options.yaml",
+    "firewall_manager.py",
+    "host_selecter.py",
+    "install.py",
+    "install.sh",
+    "installer.py",
+    "lanfxplorery.png",
+    "logout.py",
+    "main.py",
+    "path_security.py",
+    "pubspec.lock",
+    "pubspec.yaml",
+    "quic_cli.py",
+    "README.md",
+    "receive.py",
+    "requirements.txt",
+    "reset_env.py",
+    "scanner.py",
+    "set_static_ip.py",
+    "show_config.py",
+    "startsetup.py",
+    "wifi_speed.py",
+
+    "install_service.sh",
+    "lanfxplorer_service.sh",
+    "lanfxplorer_ui.sh",
+
+
+    "app.bat",
+    "install.bat",
+
 ]
 
 # Set Flutter bundle source and executable name based on OS
@@ -132,7 +136,7 @@ def build_python_ui():
 
     # Find ALL site-packages directories where dependencies might live.
     # The builder may run from a venv (e.g. "virtual/") that only has PyInstaller,
-    # while the actual app dependencies (requests, etc.) live in opt/python39.
+    # while the actual app dependencies live in the system Python site-packages.
     # We must tell PyInstaller where to find them.
     extra_paths = []
     seen_paths = set()
@@ -142,16 +146,7 @@ def build_python_ui():
             seen_paths.add(p)
             extra_paths.extend(["--paths", p])
 
-    # 1. The project's bundled Python (opt/python39) — this is where
-    #    requirements.txt packages are installed
-    bundled_py_lib = os.path.join(ROOT, "opt", "python39", "lib")
-    if os.path.isdir(bundled_py_lib):
-        for dirpath, dirnames, filenames in os.walk(bundled_py_lib):
-            if os.path.basename(dirpath) == "site-packages":
-                _add_path(dirpath)
-                print(f"    [paths] Found bundled site-packages: {dirpath}")
-
-    # 2. The current Python's site-packages (fallback)
+    # 1. System Python site-packages (primary — no more opt/python39)
     try:
         import site
         for sp in site.getsitepackages():

@@ -1,0 +1,19 @@
+# LANFXplorer — 32-bit dependencies
+# Python 3.10.x (system) required
+#
+# NOTE: aioquic removed — QUIC now uses MsQuic CLI binaries.
+# NOTE: pyOpenSSL & service-identity removed — were aioquic-only deps.
+# NOTE: bcrypt is OMITTED — no 32-bit wheel exists.
+#       Use bcrypt_compat.py (PBKDF2 fallback) instead.
+# NOTE: ownca removed — requires cryptography<35, incompatible.
+# NOTE: cryptography may need Rust to compile from source on 32-bit Linux
+#       (no manylinux_i686 wheel). Install Rust via rustup before running pip.
+
+paramiko>=3.0
+requests>=2.28
+flask>=2.3
+python-dotenv>=1.0
+elevate>=0.1
+scapy>=2.5
+cryptography>=42.0,<46.0
+keyring>=24.0

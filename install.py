@@ -42,7 +42,6 @@ FONT_TITLE  = ("Segoe UI", 18, "bold")
 STEPS = [
     ("Checking Python",         r"Checking for system Python"),
     ("Installing Python",       r"(Python found|Downloading Python|Launching Python installer|Using Python|Installer closed)"),
-    ("Installing OpenSSL",      r"(Installing OpenSSL|OpenSSL already|Launching OpenSSL|OpenSSL installer downloaded|OpenSSL installation complete)"),
     ("Upgrading pip",           r"(Installing Python dep|pip upgrade complete)"),
     ("Installing dependencies", r"(Dependencies installation complete|Verifying cryptography)"),
     ("Configuring firewall",    r"(Configuring Windows Firewall|Firewall rules configured|Firewall configuration)"),

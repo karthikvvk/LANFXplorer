@@ -12,11 +12,11 @@ import time
 from typing import Dict, Optional
 
 try:
-    # 32bittesting is not a valid package name, so we add it to path to import module directly
+    # 32bitcodes is not a valid package name, so we add it to path to import module directly
     import sys
     import os
     _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    _test_dir = os.path.join(_root, "32bittesting")
+    _test_dir = os.path.join(_root, "32bitcodes")
     if _test_dir not in sys.path:
         sys.path.append(_test_dir)
     import bcrypt_compat

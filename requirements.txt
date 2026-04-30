@@ -1,14 +1,15 @@
 # aioquic removed — QUIC transport now uses MsQuic CLI binaries (c_ver/build/sender, c_ver/build/receiver)
+# pyOpenSSL and service-identity removed — were aioquic dependencies only; not used by project code
+# ownca removed — requires cryptography<35
+# System openssl binary not required — cryptography lib uses bundled OpenSSL via cffi
+
 paramiko
 requests
 flask
 python-dotenv
 elevate
 scapy
-# NOTE: ownca removed — requires cryptography<35
 cryptography>=42.0,<46.0
-pyOpenSSL
-service-identity
 bcrypt
 keyring
 SecretStorage

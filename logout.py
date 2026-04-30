@@ -9,8 +9,6 @@ Reuses existing modules:
 
 Usage:
     python3 logout.py          # from project root
-    # or via the 32-bit launcher's Python:
-    /path/to/opt/python39/bin/python3 logout.py
 """
 
 import os

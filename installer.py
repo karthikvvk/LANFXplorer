@@ -129,15 +129,6 @@ class DependencyChecker:
         print_status("fail", f"Python 3.8+ required, found {version.major}.{version.minor}")
         return False
 
-    @staticmethod
-    def check_openssl() -> bool:
-        """Check if OpenSSL is installed."""
-        success, stdout, _ = run_command(["openssl", "version"])
-        if success and stdout:
-            print_status("ok", f"OpenSSL detected: {stdout.strip()}")
-            return True
-        print_status("fail", "OpenSSL not found")
-        return False
 
     @staticmethod
     def check_flutter() -> bool:
@@ -212,87 +203,16 @@ class DependencyChecker:
 
 
 
-    @staticmethod
-    def install_openssl_linux() -> bool:
-        """Install OpenSSL on Linux."""
-        print_status("run", "Attempting to install OpenSSL...")
-        
-        # Detect package manager
-        pkg_managers = [
-            (["apt-get", "--version"], ["sudo", "apt-get", "install", "-y", "openssl"]),
-            (["dnf", "--version"], ["sudo", "dnf", "install", "-y", "openssl"]),
-            (["yum", "--version"], ["sudo", "yum", "install", "-y", "openssl"]),
-            (["pacman", "--version"], ["sudo", "pacman", "-S", "--noconfirm", "openssl"]),
-            (["zypper", "--version"], ["sudo", "zypper", "install", "-y", "openssl"]),
-        ]
-        
-        for check_cmd, install_cmd in pkg_managers:
-            success, _, _ = run_command(check_cmd)
-            if success:
-                success, stdout, stderr = run_command(install_cmd, timeout=300)
-                if success:
-                    print_status("ok", "OpenSSL installed successfully")
-                    return True
-                else:
-                    print_status("fail", f"Failed to install OpenSSL: {stderr}")
-                    return False
-        
-        print_status("fail", "No supported package manager found")
-        return False
-
-    @staticmethod
-    def install_openssl_windows() -> bool:
-        """Guide user to install OpenSSL on Windows."""
-        print_status("info", "OpenSSL installation on Windows:")
-        print("      Option 1: winget install ShiningLight.OpenSSL")
-        print("      Option 2: choco install openssl")
-        print("      Option 3: Download from https://slproweb.com/products/Win32OpenSSL.html")
-        
-        # Try winget first
-        success, _, _ = run_command(["winget", "--version"])
-        if success:
-            print_status("run", "Attempting installation via winget...")
-            success, stdout, stderr = run_command(
-                ["winget", "install", "ShiningLight.OpenSSL", "--accept-package-agreements", "--accept-source-agreements"],
-                timeout=300
-            )
-            if success:
-                print_status("ok", "OpenSSL installed via winget")
-                return True
-        
-        # Try chocolatey
-        success, _, _ = run_command(["choco", "--version"])
-        if success:
-            print_status("run", "Attempting installation via Chocolatey...")
-            success, stdout, stderr = run_command(
-                ["choco", "install", "openssl", "-y"],
-                timeout=300
-            )
-            if success:
-                print_status("ok", "OpenSSL installed via Chocolatey")
-                return True
-        
-        print_status("warn", "Please install OpenSSL manually and add to PATH")
-        return False
-
-    def install_openssl(self) -> bool:
-        """Install OpenSSL based on OS."""
-        if SYSTEM.startswith("linux"):
-            return self.install_openssl_linux()
-        elif SYSTEM.startswith("win"):
-            return self.install_openssl_windows()
-        else:
-            print_status("warn", f"Unsupported OS: {SYSTEM}")
-            return False
 
     def check_all(self) -> dict:
         """Check all dependencies and return status."""
         print_header("Checking System Dependencies")
+        # NOTE: No standalone OpenSSL check — the cryptography pip package
+        # bundles its own OpenSSL via cffi. No system binary is required.
         results = {
-            "python":   self.check_python(),
-            "pip":      self.check_pip(),
-            "openssl":  self.check_openssl(),
-            "flutter":  self.check_flutter(),
+            "python":  self.check_python(),
+            "pip":     self.check_pip(),
+            "flutter": self.check_flutter(),
         }
         # Wireless tools are Linux-only
         if SYSTEM.startswith("linux"):
@@ -558,21 +478,21 @@ class RequirementsInstaller:
 
     def create_requirements_file(self):
         """Create a proper requirements.txt file."""
+        # NOTE: pyOpenSSL, service-identity, aioquic, ownca removed.
+        # QUIC transport now uses MsQuic CLI binaries.
+        # cryptography lib bundles its own OpenSSL — no system openssl needed.
         requirements = [
-            "aioquic",
-            "streamlit",
             "paramiko",
             "requests",
             "flask",
-            "flask-cors",
             "python-dotenv",
             "elevate",
             "scapy",
-            "ownca",
-            "cryptography",
-            "pyOpenSSL",
-            "service-identity",
+            "cryptography>=42.0,<46.0",
             "bcrypt",
+            "keyring",
+            "SecretStorage",
+            "keyrings.alt",
         ]
 
         with open(self.requirements_file, "w") as f:
@@ -939,12 +859,6 @@ class Installer:
     def check_dependencies(self) -> bool:
         """Check all dependencies."""
         results = self.dep_checker.check_all()
-
-        # OpenSSL is critical
-        if not results["openssl"]:
-            print_status("info", "Attempting to install OpenSSL...")
-            if not self.dep_checker.install_openssl():
-                print_status("warn", "OpenSSL installation failed. Please install manually.")
 
         # iw / wireless-tools (Linux only, non-critical but needed for WiFi speed)
         if SYSTEM.startswith("linux"):
