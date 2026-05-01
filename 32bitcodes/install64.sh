@@ -56,21 +56,21 @@ fi
 DEPS="python3 curl"
 
 install_deps() {
-  echo "[+] Installing system dependencies: $DEPS"
+  echo "[+] Installing system dependencies: $DEPS + tkinter (dev)"
   if command -v apt-get >/dev/null 2>&1; then
     sudo apt-get update
-    sudo apt-get install -y $DEPS
+    sudo apt-get install -y $DEPS python3-tk
   elif command -v dnf >/dev/null 2>&1; then
-    sudo dnf install -y $DEPS
+    sudo dnf install -y $DEPS python3-tkinter
   elif command -v yum >/dev/null 2>&1; then
-    sudo yum install -y $DEPS
+    sudo yum install -y $DEPS python3-tkinter
   elif command -v pacman >/dev/null 2>&1; then
-    sudo pacman -Sy --noconfirm python python-pip curl
+    sudo pacman -Sy --noconfirm python python-pip curl tk
   elif command -v apk >/dev/null 2>&1; then
-    sudo apk add python3 py3-pip curl
+    sudo apk add python3 py3-pip curl python3-tkinter tk
   else
     echo "[!] No supported package manager found."
-    echo "    Please install manually: python3 curl"
+    echo "    Please install manually: python3 curl python3-tk"
     echo "    (pip is NOT needed system-wide — the venv provides its own pip)"
     exit 1
   fi

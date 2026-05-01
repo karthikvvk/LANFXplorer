@@ -56,25 +56,25 @@ fi
 DEPS="python3 curl cmake"
 
 install_deps() {
-  echo "[+] Installing system dependencies: $DEPS + keyring backend"
+  echo "[+] Installing system dependencies: $DEPS + keyring backend + tkinter (dev)"
   if command -v apt-get >/dev/null 2>&1; then
     sudo apt-get update
-    sudo apt-get install -y $DEPS gnome-keyring libsecret-1-0 libsecret-1-dev
+    sudo apt-get install -y $DEPS gnome-keyring libsecret-1-0 libsecret-1-dev python3-tk
   elif command -v dnf >/dev/null 2>&1; then
-    sudo dnf install -y $DEPS gnome-keyring libsecret libsecret-devel
+    sudo dnf install -y $DEPS gnome-keyring libsecret libsecret-devel python3-tkinter
   elif command -v yum >/dev/null 2>&1; then
-    sudo yum install -y $DEPS gnome-keyring libsecret libsecret-devel
+    sudo yum install -y $DEPS gnome-keyring libsecret libsecret-devel python3-tkinter
   elif command -v xbps-install >/dev/null 2>&1; then
-    sudo xbps-install -Sy $DEPS gnome-keyring libsecret libsecret-devel
+    sudo xbps-install -Sy $DEPS gnome-keyring libsecret libsecret-devel python3-tkinter
   elif command -v zypper >/dev/null 2>&1; then
-    sudo zypper install -y $DEPS gnome-keyring libsecret-devel
+    sudo zypper install -y $DEPS gnome-keyring libsecret-devel python3-tk
   elif command -v pacman >/dev/null 2>&1; then
-    sudo pacman -Sy --noconfirm $DEPS gnome-keyring libsecret
+    sudo pacman -Sy --noconfirm $DEPS gnome-keyring libsecret tk
   elif command -v apk >/dev/null 2>&1; then
-    sudo apk add $DEPS gnome-keyring libsecret-dev
+    sudo apk add $DEPS gnome-keyring libsecret-dev python3-tkinter tk
   else
     echo "[!] No supported package manager found."
-    echo "    Please install manually: python3 cmake gnome-keyring libsecret"
+    echo "    Please install manually: python3 cmake gnome-keyring libsecret python3-tk"
     echo "    (pip is NOT needed system-wide — the venv provides its own pip)"
     exit 1
   fi
