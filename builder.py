@@ -30,7 +30,8 @@ except:
 # Files and directories to include
 ITEMS = [
     "32bitscreens",
-    "c_ver",
+    "binaries",
+
     "pki",
     "scripts",
 
@@ -77,11 +78,11 @@ ITEMS = [
 if SYSTEM.startswith("win"):
     FLUTTER_BUNDLE_SRC = "\\build\\windows\\x64\\runner\\Release"
     EXECUTABLE_NAME = "lanfxplorer.exe"
-    PYTHON_UI_EXE_NAME = "python_ui.exe"
+    PYTHON_UI_EXE_NAME = "py_ui_64.exe"
 else:
     FLUTTER_BUNDLE_SRC = "/build/linux/x64/release/bundle"
     EXECUTABLE_NAME = "lanfxplorer"
-    PYTHON_UI_EXE_NAME = "python_ui"
+    PYTHON_UI_EXE_NAME = "py_ui_64"
 
 PYTHON_BUILD_DIR = os.path.join(ROOT, "python_build")
 
@@ -98,7 +99,7 @@ def build_python_ui():
         print("[!] Python UI entry point not found, skipping PyInstaller build")
         return None
 
-    base_dir = os.path.join(PYTHON_BUILD_DIR, "python_ui")
+    base_dir = os.path.join(PYTHON_BUILD_DIR, "py_ui_64")
     dist_dir = os.path.join(base_dir, "dist")
     work_dir = os.path.join(base_dir, "work")
     spec_dir = base_dir
@@ -158,7 +159,7 @@ def build_python_ui():
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--onefile",
-        "--name", "python_ui",
+        "--name", "py_ui_64",
         "--distpath", dist_dir,
         "--workpath", work_dir,
         "--specpath", spec_dir,
@@ -455,13 +456,30 @@ def main():
 
     # --- Build and include Python UI (PyInstaller) ---
     python_ui_exe = build_python_ui()
+
+    # Destination folder for all py_ui binaries in the archive
+    python_ui_dest = os.path.join(APPBUILD, "py_ui_64")
+    os.makedirs(python_ui_dest, exist_ok=True)
+
     if python_ui_exe:
-        python_ui_dest = os.path.join(APPBUILD, "python_ui")
-        os.makedirs(python_ui_dest, exist_ok=True)
         shutil.copy2(python_ui_exe, os.path.join(python_ui_dest, PYTHON_UI_EXE_NAME))
-        print(f"[*] Included Python UI executable in archive")
+        print(f"[*] Included Python UI executable in archive: {PYTHON_UI_EXE_NAME}")
     else:
         print("[!] Warning: Python UI executable not included in archive")
+
+    # Pick up py_ui_32 if it was manually placed in binaries/
+    if SYSTEM.startswith("win"):
+        py_ui_32_src = os.path.join(ROOT, "binaries", "py_ui_32.exe")
+        py_ui_32_dst = os.path.join(python_ui_dest, "py_ui_32.exe")
+    else:
+        py_ui_32_src = os.path.join(ROOT, "binaries", "py_ui_32")
+        py_ui_32_dst = os.path.join(python_ui_dest, "py_ui_32")
+
+    if os.path.exists(py_ui_32_src):
+        shutil.copy2(py_ui_32_src, py_ui_32_dst)
+        print(f"[*] Included py_ui_32 binary from binaries/ in archive")
+    else:
+        print("[i] py_ui_32 not found in binaries/ — skipping (drop it in manually on 32-bit machine)")
 
     # Cleanup temporary python_build directory
     if os.path.exists(PYTHON_BUILD_DIR):
@@ -498,6 +516,7 @@ def main():
     if os.path.exists(APPBUILD):
         shutil.rmtree(APPBUILD)
         print(f"[*] Cleaned up temporary build directory: {APPBUILD}")
+        # os.remove("data, logs, lanfxplorer")
 
     # Output release instructions for the user
     print("\n" + "=" * 60)

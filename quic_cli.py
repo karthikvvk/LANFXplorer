@@ -27,9 +27,9 @@ from app_config import get_config, AppConfig
 # ---------------------------------------------------------------------------
 
 APP_DIR      = Path(__file__).parent.resolve()
-CVER_BUILD   = APP_DIR / "c_ver" / "build"
-SENDER_BIN   = CVER_BUILD / "sender"
-RECEIVER_BIN = CVER_BUILD / "receiver"
+BINARIES_DIR = APP_DIR / "binaries"
+SENDER_BIN   = BINARIES_DIR / "sender"
+RECEIVER_BIN = BINARIES_DIR / "receiver"
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +42,8 @@ def _check_binaries() -> None:
         if not binary.exists():
             raise FileNotFoundError(
                 f"MsQuic binary not found: {binary}\n"
-                f"Build with:  cd c_ver && cmake -B build . && cmake --build build"
+                f"Build with:  cd c_ver && cmake -B build . && cmake --build build\n"
+                f"Then copy outputs:  cp c_ver/build/sender c_ver/build/receiver binaries/"
             )
 
 

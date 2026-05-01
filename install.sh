@@ -130,9 +130,9 @@ fi
 echo "[✓] Python requirements installed"
 
 # ===============================
-# Build MsQuic CLI binaries (c_ver/sender + c_ver/receiver)
+# Build MsQuic CLI binaries → binaries/
 # ===============================
-echo "[+] Building MsQuic CLI binaries (c_ver/sender, c_ver/receiver)"
+echo "[+] Building MsQuic CLI binaries (sender, receiver) → $APP_DIR/binaries"
 
 if ! ldconfig -p 2>/dev/null | grep -q libmsquic; then
   echo "[!] WARNING: libmsquic not found in system libraries."
@@ -141,9 +141,14 @@ if ! ldconfig -p 2>/dev/null | grep -q libmsquic; then
   echo "    Skipping binary build — transfer will fail until libmsquic is installed."
 else
   CVER_DIR="$APP_DIR/c_ver"
+  BIN_DIR="$APP_DIR/binaries"
+  mkdir -p "$BIN_DIR"
   cmake -B "$CVER_DIR/build" -DCMAKE_BUILD_TYPE=Release "$CVER_DIR" && \
   cmake --build "$CVER_DIR/build" && \
-  echo "[✓] MsQuic binaries built: $CVER_DIR/build/sender  $CVER_DIR/build/receiver" || \
+  cp "$CVER_DIR/build/sender"   "$BIN_DIR/sender" && \
+  cp "$CVER_DIR/build/receiver" "$BIN_DIR/receiver" && \
+  chmod +x "$BIN_DIR/sender" "$BIN_DIR/receiver" && \
+  echo "[✓] MsQuic binaries installed: $BIN_DIR/sender  $BIN_DIR/receiver" || \
   echo "[!] MsQuic binary build failed — check cmake output above."
 fi
 

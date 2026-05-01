@@ -303,8 +303,29 @@ def main():
                     print_status("warn", f"Flutter UI failed: {e}. Falling back to Tkinter...")
 
         if not ui_launched:
+            # ── Try frozen py_ui binary (distribution package) ────────────────
+            # Builder places both binaries in APP_DIR/py_ui_64/:
+            #   py_ui_64   — built on 64-bit (via builder.py)
+            #   py_ui_32   — manually dropped in from a 32-bit build
+            _py_ui_dir = APP_DIR / "py_ui_64"
+            if system == "windows":
+                _py_ui_bin = _py_ui_dir / (f"py_ui_{arch_bits}.exe")
+            else:
+                _py_ui_bin = _py_ui_dir / f"py_ui_{arch_bits}"
+
+            if _py_ui_bin.exists() and os.access(str(_py_ui_bin), os.X_OK):
+                print_status("run", f"Starting Python UI ({_py_ui_bin.name})")
+                try:
+                    subprocess.run([str(_py_ui_bin)])
+                    ui_launched = True
+                except KeyboardInterrupt:
+                    pass
+                except Exception as e:
+                    print_status("warn", f"Frozen UI failed: {e}. Falling back to module import...")
+
+        if not ui_launched:
             try:
-                print_status("run", "Starting Tkinter UI")
+                print_status("run", "Starting Tkinter UI (module)")
                 sys.path.insert(0, str(APP_DIR / "32bitscreens"))
                 import tkinter_app
                 tkinter_app.main()          # blocks until window is closed
