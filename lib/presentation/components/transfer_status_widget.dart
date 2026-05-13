@@ -104,28 +104,59 @@ class _TransferTaskItem extends StatelessWidget {
               ),
               if (task.status == TransferStatus.failed)
                 Icon(Icons.error, size: 16, color: colorScheme.error),
+              if (task.status == TransferStatus.completed)
+                Icon(Icons.check_circle, size: 16, color: colorScheme.primary),
             ],
           ),
           const SizedBox(height: AppSpacing.xs),
+          // ── Progress bar ────────────────────────────────────────────────
+          // In-progress: indeterminate sliding shimmer (no percentage shown)
+          // Completed/Failed: solid filled bar
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: task.progress,
-              backgroundColor: colorScheme.surfaceContainerHighest,
-              color: task.status == TransferStatus.failed
-                  ? colorScheme.error
-                  : colorScheme.primary,
-              minHeight: 4,
-            ),
+            child: task.status == TransferStatus.inProgress
+                ? LinearProgressIndicator(
+                    value: null,  // indeterminate — slides left-to-right
+                    backgroundColor:
+                        colorScheme.surfaceContainerHighest,
+                    color: colorScheme.primary,
+                    minHeight: 5,
+                  )
+                : LinearProgressIndicator(
+                    value: task.status == TransferStatus.completed
+                        ? 1.0
+                        : task.progress.clamp(0.0, 1.0),
+                    backgroundColor:
+                        colorScheme.surfaceContainerHighest,
+                    color: task.status == TransferStatus.failed
+                        ? colorScheme.error
+                        : colorScheme.primary,
+                    minHeight: 5,
+                  ),
           ),
-          if (task.errorMessage != null) ...[
-            const SizedBox(height: AppSpacing.xs),
+          const SizedBox(height: 4),
+          // ── Status label — file count or error ──────────────────────────
+          if (task.status == TransferStatus.inProgress)
+            Text(
+              'Transferring…',
+              style: context.textStyles.bodySmall?.withColor(
+                colorScheme.onSurfaceVariant,
+              ),
+            ),
+          if (task.status == TransferStatus.completed && task.errorMessage != null)
+            Text(
+              task.errorMessage!,
+              style: context.textStyles.bodySmall?.withColor(
+                colorScheme.onSurfaceVariant,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          if (task.status == TransferStatus.failed && task.errorMessage != null)
             Text(
               task.errorMessage!,
               style: context.textStyles.bodySmall?.withColor(colorScheme.error),
               overflow: TextOverflow.ellipsis,
             ),
-          ],
         ],
       ),
     );

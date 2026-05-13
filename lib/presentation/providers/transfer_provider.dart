@@ -105,21 +105,19 @@ class TransferProvider extends ChangeNotifier {
         return false;
       }
 
-      // Poll for progress - first poll is immediate
+      // Poll for status — 1s interval (push-driven backend is rarely stale)
       int pollAttempts = 0;
-      const maxPollAttempts = 600; // 5 minutes max
-      int pollIntervalMs = 500; // Start with 500ms, adjust after first poll
+      const maxPollAttempts = 600; // 10 minutes max
+      const pollIntervalMs  = 1000;
 
       while (pollAttempts < maxPollAttempts) {
-        // First poll is immediate (no delay), then use calculated interval
         if (pollAttempts > 0) {
-          await Future.delayed(Duration(milliseconds: pollIntervalMs));
+          await Future.delayed(const Duration(milliseconds: pollIntervalMs));
         }
         pollAttempts++;
 
         final status = await _apiService.getTransferStatus(backendTaskId);
         if (status == null) {
-          // Polling failed, wait and retry
           if (pollAttempts > 10) {
             AppLogger.warning('Polling failed, retrying...');
           }
@@ -127,21 +125,12 @@ class TransferProvider extends ChangeNotifier {
           continue;
         }
 
-        // On first successful poll, adjust interval based on file size
-        // Larger files = slower progress = less frequent polls
-        if (pollAttempts == 1 && status.totalSize > 0) {
-          // Calculate poll interval: ~1 second per 10MB, min 500ms, max 2000ms
-          final sizeMb = status.totalSize / (1024 * 1024);
-          pollIntervalMs = (sizeMb * 100).clamp(500, 2000).toInt();
-          AppLogger.info(
-              'Poll interval set to ${pollIntervalMs}ms for ${sizeMb.toStringAsFixed(1)}MB file');
-        }
-
-        // Update local task with progress
+        // Update local task — backend now gives accurate file-count progress
         _updateTask(taskId, TransferStatus.inProgress, status.progress);
 
         if (status.isCompleted) {
-          _updateTask(taskId, TransferStatus.completed, 1.0);
+          _updateTask(taskId, TransferStatus.completed, 1.0,
+              errorMessage: status.error);
           return true;
         } else if (status.isFailed) {
           _updateTask(taskId, TransferStatus.failed, status.progress,
@@ -207,21 +196,19 @@ class TransferProvider extends ChangeNotifier {
         return false;
       }
 
-      // Poll for progress - same logic as sendFiles
+      // Poll for status — same 1s flat interval as sendFiles
       int pollAttempts = 0;
-      const maxPollAttempts = 600; // 5 minutes max
-      int pollIntervalMs = 500; // Start with 500ms, adjust after first poll
+      const maxPollAttempts = 600;
+      const pollIntervalMs  = 1000;
 
       while (pollAttempts < maxPollAttempts) {
-        // First poll is immediate (no delay), then use calculated interval
         if (pollAttempts > 0) {
-          await Future.delayed(Duration(milliseconds: pollIntervalMs));
+          await Future.delayed(const Duration(milliseconds: pollIntervalMs));
         }
         pollAttempts++;
 
         final status = await _apiService.getTransferStatus(backendTaskId);
         if (status == null) {
-          // Polling failed, wait and retry
           if (pollAttempts > 10) {
             AppLogger.warning('Polling failed, retrying...');
           }
@@ -229,19 +216,11 @@ class TransferProvider extends ChangeNotifier {
           continue;
         }
 
-        // On first successful poll, adjust interval based on file size
-        if (pollAttempts == 1 && status.totalSize > 0) {
-          final sizeMb = status.totalSize / (1024 * 1024);
-          pollIntervalMs = (sizeMb * 100).clamp(500, 2000).toInt();
-          AppLogger.info(
-              'Poll interval set to ${pollIntervalMs}ms for ${sizeMb.toStringAsFixed(1)}MB file');
-        }
-
-        // Update local task with progress
         _updateTask(taskId, TransferStatus.inProgress, status.progress);
 
         if (status.isCompleted) {
-          _updateTask(taskId, TransferStatus.completed, 1.0);
+          _updateTask(taskId, TransferStatus.completed, 1.0,
+              errorMessage: status.error);
           return true;
         } else if (status.isFailed) {
           _updateTask(taskId, TransferStatus.failed, status.progress,

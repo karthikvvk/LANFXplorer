@@ -13,7 +13,14 @@
 //   g++ -std=c++17 -O2 sender.cpp -lmsquic -o sender
 //
 // Usage:
-//   ./sender <file> <host> <port>
+//   ./sender <file> <host> <port> [max_inflight]
+//
+//   max_inflight (argv[4], optional, default 32):
+//     Maximum number of unidirectional chunk-streams that may be in-flight
+//     simultaneously over the single QUIC connection.  Higher values push
+//     more data into the congestion window at once; lower values reduce
+//     memory pressure on constrained hardware.
+//     Recommended range: 8 (low-mem / slow link) – 64 (GigE / fast NVMe).
 
 #include <msquic.h>
 #include <cstdio>
@@ -25,8 +32,8 @@
 #include <chrono>
 #include <algorithm>
 
-static constexpr uint32_t    CHUNK_SIZE      = 4 * 1024 * 1024;
-static constexpr int         MAX_INFLIGHT    = 32;   // conservative — avoids flow control stall
+static constexpr uint32_t    CHUNK_SIZE   = 4 * 1024 * 1024;
+static int                   MAX_INFLIGHT = 32;  // overridden by argv[4] at runtime
 static constexpr const char* ALPN_STR        = "quicfile";
 static constexpr uint32_t    IDLE_TIMEOUT_MS = 60'000;
 
@@ -161,12 +168,19 @@ bool SendChunk(HQUIC Conn, const uint8_t* chunkData, size_t chunkLen,
 
 int main(int argc, char* argv[]) {
     if (argc < 4) {
-        fprintf(stderr, "usage: sender <file> <host> <port>\n");
+        fprintf(stderr, "usage: sender <file> <host> <port> [max_inflight]\n");
         return 1;
     }
     const char* path = argv[1];
     const char* host = argv[2];
     uint16_t    port = static_cast<uint16_t>(atoi(argv[3]));
+
+    // argv[4] — optional max in-flight streams (default 32)
+    if (argc >= 5) {
+        int mf = atoi(argv[4]);
+        if (mf > 0) MAX_INFLIGHT = mf;
+        printf("[sender] max_inflight=%d (from argv[4])\n", MAX_INFLIGHT);
+    }
 
     // ── load file ──────────────────────────────────────────────────────────
     FILE* f = fopen(path, "rb");

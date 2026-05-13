@@ -92,6 +92,7 @@ def send_file_cli(
     *,
     remote_host: str = None,
     remote_port: int = None,
+    max_inflight: int = 32,   # argv[4]: parallel chunk-streams in-flight
     on_progress=None,   # kept for drop-in API compat; silently ignored
 ) -> bool:
     """
@@ -131,7 +132,7 @@ def send_file_cli(
     if not os.path.isfile(abs_path):
         raise FileNotFoundError(f"File not found: {abs_path}")
 
-    cmd = [str(SENDER_BIN), abs_path, host, str(port)]
+    cmd = [str(SENDER_BIN), abs_path, host, str(port), str(max_inflight)]
     print(f"[quic_cli] sender cmd: {' '.join(cmd)}")
 
     result = subprocess.run(cmd, cwd=str(APP_DIR))

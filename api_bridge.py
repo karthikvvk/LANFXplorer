@@ -74,19 +74,20 @@ def get_time():
         return wrapper
     return decorator
 
-# [TRANSFER STATUS DISABLED] ──────────────────────────────────────────────────
-# _transfer_tasks = {}  # task_id -> {status, progress, total_size, transferred, files, error, start_time, estimated_duration}
-
-# # Mapping of task_id -> remote_host for fetch operations that need to proxy status requests
-# _fetch_task_mapping = {}  # task_id -> {"remote_host": str, "remote_task_id": str}
-
-# _transfer_lock = Lock()
-# ──────────────────────────────────────────────────────────────────────────────
-
-# Stub replacements so existing references don't crash at import time
+# ── Transfer task registry (lightweight: status + file counts only) ───────────
+# task_id -> {status, total_files, completed_count, failed_count, start_time}
+# Re-enabled with push-driven updates from /file_received.
 _transfer_tasks = {}
+_transfer_lock  = Lock()
+
+# ── Job-event registry: job_id -> sender_ip ───────────────────────────────────
+# Populated by /prepare_receive; used by _watch_receiver to know where to push.
+# job_id is a per-file UUID distinct from task_id (which spans all files).
+_job_sender_map: dict = {}    # job_id -> sender_ip
+_job_map_lock   = Lock()
+
+# ── Fetch-task mapping (kept for completeness; push makes it rarely needed) ───
 _fetch_task_mapping = {}
-_transfer_lock = Lock()
 
 # Cache WiFi speed (detect once at startup or first transfer)
 _wifi_speed_mbps = None
@@ -106,110 +107,73 @@ def _get_cached_wifi_speed():
     return _wifi_speed_mbps
 
 
-# [TRANSFER STATUS DISABLED] _create_transfer_task commented out ──────────────
-# def _create_transfer_task(files: list, remote_host: str, direction: str = "send") -> str:
-#     """Create a new transfer task and return its ID."""
-#     task_id = str(uuid.uuid4())
-#     total_size = 0
-#     for f in files:
-#         if os.path.isfile(f):
-#             total_size += os.path.getsize(f)
-#
-#     wifi_speed = _get_cached_wifi_speed()
-#     estimated_duration = estimate_transfer_time_seconds(total_size, wifi_speed)
-#
-#     with _transfer_lock:
-#         _transfer_tasks[task_id] = {
-#             "status": "in_progress",
-#             "progress": 0.0,
-#             "total_size": total_size,
-#             "transferred": 0,
-#             "files": files,
-#             "remote_host": remote_host,
-#             "direction": direction,
-#             "error": None,
-#             "current_file": files[0] if files else None,
-#             "start_time": time.time(),
-#             "estimated_duration": estimated_duration,
-#             "wifi_speed_mbps": wifi_speed,
-#             # ── Per-file tracking ──────────────────────────────────────────
-#             # Ground truth: updated after each file's send_file_cli() returns.
-#             "total_files": len(files),
-#             "completed_count": 0,
-#             "completed_files": [],   # basenames/relpaths confirmed on remote disk
-#             "failed_files": [],      # basenames/relpaths that failed
-#         }
-#     print(f"[transfer] Task {task_id[:8]}... created: {len(files)} files, "
-#           f"{total_size/(1024*1024):.1f}MB, ETA: {estimated_duration:.1f}s at {wifi_speed}Mbps")
-#     return task_id
-# ─────────────────────────────────────────────────────────────────────────────
 def _create_transfer_task(files: list, remote_host: str, direction: str = "send") -> str:
-    """DISABLED: Transfer status tracking is disabled. Returns a stub task_id."""
-    return str(uuid.uuid4())
+    """Create a lightweight transfer task entry and return its ID.
+
+    Tracks only: status, total_files, completed_count, failed_count.
+    No byte-level tracking — UI uses indeterminate bar while in_progress.
+    """
+    task_id = str(uuid.uuid4())
+    with _transfer_lock:
+        _transfer_tasks[task_id] = {
+            "status":          "in_progress",
+            "total_files":     len(files),
+            "completed_count": 0,
+            "failed_count":    0,
+            "start_time":      time.time(),
+            "error":           None,
+        }
+    print(f"[transfer] Task {task_id[:8]}... created: {len(files)} file(s) → {remote_host}")
+    return task_id
 
 
-# [TRANSFER STATUS DISABLED] _update_transfer_progress commented out ──────────
-# def _update_transfer_progress(task_id: str, bytes_sent: int, total_bytes: int):
-#     """Update transfer progress using real byte counts (not time estimates).
-#     With MsQuic CLI binaries transfers complete far faster than the old
-#     aioquic estimate — time-based simulation is always wrong here.
-#     """
-#     with _transfer_lock:
-#         if task_id in _transfer_tasks:
-#             task = _transfer_tasks[task_id]
-#             task["transferred"] = bytes_sent
-#             if total_bytes > 0:
-#                 # Real progress: how many bytes have actually been confirmed sent
-#                 # Cap at 0.99 until _complete_transfer_task sets it to 1.0
-#                 task["progress"] = min(bytes_sent / total_bytes, 0.99)
-# ─────────────────────────────────────────────────────────────────────────────
 def _update_transfer_progress(task_id: str, bytes_sent: int, total_bytes: int):
-    """DISABLED: Transfer status tracking is disabled. No-op stub."""
-    pass  # [TRANSFER STATUS DISABLED]
+    """No-op — byte-level progress is not tracked; UI uses indeterminate bar."""
+    pass
 
 
-# [TRANSFER STATUS DISABLED] _complete_transfer_task commented out ────────────
-# def _complete_transfer_task(task_id: str, success: bool, error: str = None):
-#     """Mark a transfer task as completed or failed."""
-#     with _transfer_lock:
-#         if task_id in _transfer_tasks:
-#             task = _transfer_tasks[task_id]
-#             task["status"] = "completed" if success else "failed"
-#             task["progress"] = 1.0 if success else task["progress"]
-#             task["error"] = error
-#             actual_duration = time.time() - task["start_time"]
-#             print(f"[transfer] Task {task_id[:8]}... {'completed' if success else 'failed'}: "
-#                   f"actual={actual_duration:.1f}s, estimated={task['estimated_duration']:.1f}s")
-# ─────────────────────────────────────────────────────────────────────────────
 def _complete_transfer_task(task_id: str, success: bool, error: str = None):
-    """DISABLED: Transfer status tracking is disabled. No-op stub."""
-    pass  # [TRANSFER STATUS DISABLED]
+    """Mark a transfer task as completed or failed."""
+    with _transfer_lock:
+        if task_id in _transfer_tasks:
+            _transfer_tasks[task_id]["status"] = "completed" if success else "failed"
+            _transfer_tasks[task_id]["error"]  = error
+            elapsed = time.time() - _transfer_tasks[task_id]["start_time"]
+            print(f"[transfer] Task {task_id[:8]}... "
+                  f"{'completed' if success else 'FAILED'} in {elapsed:.1f}s")
 
 
-# [TRANSFER STATUS DISABLED] _mark_file_done commented out ────────────────────
-# def _mark_file_done(task_id: str, filename: str, success: bool) -> None:
-#     """Record a single file as sent (success) or failed within a multi-file task.
-#
-#     *filename* should be the relative path / basename shown to the user.
-#     Called from _do_send_background after every send_file_cli() returns so
-#     the Flutter UI can poll per-file progress without waiting for the whole task.
-#     """
-#     with _transfer_lock:
-#         if task_id not in _transfer_tasks:
-#             return
-#         task = _transfer_tasks[task_id]
-#         if success:
-#             task["completed_files"].append(filename)
-#             task["completed_count"] = len(task["completed_files"])
-#         else:
-#             task["failed_files"].append(filename)
-# ─────────────────────────────────────────────────────────────────────────────
 def _mark_file_done(task_id: str, filename: str, success: bool) -> None:
-    """DISABLED: Transfer status tracking is disabled. No-op stub."""
-    pass  # [TRANSFER STATUS DISABLED]
+    """Record one file as done within a multi-file task.
+
+    Called by the sender loop after each send_file_cli() returns.
+    When completed_count + failed_count == total_files the task auto-completes.
+    """
+    with _transfer_lock:
+        if task_id not in _transfer_tasks:
+            return
+        task = _transfer_tasks[task_id]
+        if success:
+            task["completed_count"] += 1
+        else:
+            task["failed_count"] += 1
+        done = task["completed_count"] + task["failed_count"]
+        if done >= task["total_files"]:
+            if task["failed_count"] == 0:
+                task["status"] = "completed"
+            elif task["completed_count"] == 0:
+                task["status"] = "failed"
+                task["error"]  = f"All {task['failed_count']} file(s) failed"
+            else:
+                task["status"] = "completed"   # partial — treat as done for UI
+                task["error"]  = (
+                    f"Partial: {task['completed_count']} sent, "
+                    f"{task['failed_count']} failed"
+                )
 
 
 import threading
+
 
 # ==================== DEPRECATED: Threading-based Peer Discovery ====================
 # NOTE: This threading-based implementation is DEPRECATED.
@@ -641,9 +605,11 @@ def send_files():
                             "filename": filename,
                             "filesize": file_size,
                             "dest_dir": dest_dir,
+                            "task_id":  task_id,   # for push-back /file_received
                         },
                         timeout=20,
                     )
+
                 except requests.RequestException as e:
                     # Can't reach the remote at all — abort entire transfer.
                     transport_error = f"Cannot reach /prepare_receive on {remote_host}: {e}"
@@ -757,27 +723,109 @@ def send_files():
     thread = threading.Thread(target=_do_send_background, daemon=True)
     thread.start()
 
-    # [TRANSFER STATUS DISABLED] — return static "completed" instead of in_progress + task_id
-    # Original polling response commented out:
-    # return jsonify({
-    #     "status": "in_progress",
-    #     "task_id": task_id,
-    #     "remote_host": remote_host,
-    #     "port": port,
-    #     "files": all_file_paths,
-    #     "missing": missing
-    # }), 202  # 202 Accepted
+    # Return immediately with task_id so Flutter can poll /transfer_status
     return jsonify({
-        "status": "completed",
-        "task_id": task_id,
+        "status":      "in_progress",
+        "task_id":     task_id,
         "remote_host": remote_host,
-        "port": port,
-        "files": all_file_paths,
-        "missing": missing
+        "port":        port,
+        "files":       all_file_paths,
+        "missing":     missing
+    }), 202  # 202 Accepted
+
+
+# ── /transfer_status ───────────────────────────────────────────────────────────────────
+@app.route("/transfer_status/<task_id>", methods=["GET"])
+def transfer_status(task_id):
+    """Return lightweight transfer status (push-driven via /file_received).
+
+    Response fields intentionally minimal — UI only needs status + counts.
+    """
+    with _transfer_lock:
+        if task_id not in _transfer_tasks:
+            # Unknown task — return completed so the UI stops polling
+            return jsonify({
+                "status":          "completed",
+                "total_files":     0,
+                "completed_count": 0,
+                "failed_count":    0,
+                "error":           None,
+                "elapsed":         0,
+            }), 200
+        task = _transfer_tasks[task_id].copy()
+
+    return jsonify({
+        "status":          task["status"],
+        "total_files":     task["total_files"],
+        "completed_count": task["completed_count"],
+        "failed_count":    task["failed_count"],
+        "error":           task["error"],
+        "elapsed":         time.time() - task["start_time"],
+        # Legacy fields — kept so old Flutter code doesn’t throw on missing keys
+        "progress":        (
+            task["completed_count"] / max(task["total_files"], 1)
+        ),
+        "total_size":      0,
+        "transferred":     0,
+        "files":           [],
+        "current_file":    None,
+        "estimated_duration": 0,
+        "completed_files": [],
+        "failed_files":    [],
     }), 200
 
 
-# [TRANSFER STATUS DISABLED] /transfer_status route commented out ─────────────
+# ── /file_received — receiver-push UI notification endpoint ───────────────────
+# Called ONLY by the remote receiver-watcher thread (via best-effort daemon
+# thread) when a file is received cleanly.  Purely a UI counter update.
+# Does NOT affect transfer flow, binary lifecycle, or port management.
+@app.route("/file_received", methods=["POST"])
+def file_received():
+    """Receive a push notification from the remote receiver when a file completes.
+
+    Payload:  { "task_id": str, "filename": str, "success": bool }
+    Response: 200 always (fire-and-forget; errors are silently swallowed by caller)
+    """
+    data     = request.get_json(silent=True) or {}
+    task_id  = data.get("task_id",  "")
+    filename = data.get("filename", "?")
+    success  = bool(data.get("success", True))
+
+    if not task_id:
+        return jsonify({"ok": False, "reason": "task_id required"}), 400
+
+    with _transfer_lock:
+        if task_id not in _transfer_tasks:
+            # Task may have already been cleaned up — ignore silently
+            print(f"[file_received] Unknown task_id {task_id[:8]}... (ignored)")
+            return jsonify({"ok": True, "note": "task not found, ignored"}), 200
+
+        task = _transfer_tasks[task_id]
+        if success:
+            task["completed_count"] += 1
+        else:
+            task["failed_count"] += 1
+
+        done = task["completed_count"] + task["failed_count"]
+        if done >= task["total_files"]:
+            if task["failed_count"] == 0:
+                task["status"] = "completed"
+            elif task["completed_count"] == 0:
+                task["status"] = "failed"
+                task["error"]  = f"All {task['failed_count']} file(s) failed on receiver"
+            else:
+                task["status"] = "completed"
+                task["error"]  = (
+                    f"Partial: {task['completed_count']} received, "
+                    f"{task['failed_count']} failed"
+                )
+
+    status_now = _transfer_tasks[task_id]["status"]
+    print(
+        f"[file_received] task={task_id[:8]}  file='{filename}'  "
+        f"ok={success}  task_status={status_now}"
+    )
+    return jsonify({"ok": True}), 200
 # @app.route("/transfer_status/<task_id>", methods=["GET"])
 # def transfer_status(task_id):
 #     """Get the status of a transfer task."""
@@ -864,24 +912,8 @@ def send_files():
 #         "failed_files":     task.get("failed_files", []),
 #     }), 200
 # ─────────────────────────────────────────────────────────────────────────────
-@app.route("/transfer_status/<task_id>", methods=["GET"])
-def transfer_status(task_id):
-    """DISABLED: Transfer status tracking is disabled. Always returns static completed."""
-    return jsonify({
-        "status":          "completed",
-        "progress":        1.0,
-        "total_size":      0,
-        "transferred":     0,
-        "files":           [],
-        "current_file":    None,
-        "error":           None,
-        "estimated_duration": 0,
-        "elapsed":         0,
-        "total_files":     0,
-        "completed_count": 0,
-        "completed_files": [],
-        "failed_files":    [],
-    }), 200
+
+
 
 
 @app.route("/receive_files", methods=["POST"])
@@ -1426,21 +1458,72 @@ def prepare_receive():
 
         _active_receivers[quic_port] = spawned_proc
 
-    # Spawn a watcher thread that removes the entry once the receiver exits
-    def _watch_receiver(p, proc):
+    # Generate a per-file job_id for the push notification side-channel
+    job_id    = str(uuid.uuid4())
+    sender_ip = request.remote_addr  # IP of the machine that sent the QUIC data
+    task_id_hint = data.get("task_id", "")  # optional hint from sender
+
+    with _job_map_lock:
+        _job_sender_map[job_id] = {
+            "sender_ip":  sender_ip,
+            "task_id":    task_id_hint,
+            "filename":   filename,
+        }
+
+    # Spawn a watcher thread that:
+    #   1. Removes the port entry once the receiver exits (original purpose)
+    #   2. Fires a best-effort push notification back to the sender (UI only)
+    def _watch_receiver(p, proc, jid, s_ip, t_id, fname):
         proc.wait()
+        success = (proc.returncode == 0)
+
+        # ── Original: release port ────────────────────────────────────────────
         with _receiver_lock:
             _active_receivers.pop(p, None)
-        print(f"[prepare_receive] Receiver on port {p} exited (returncode={proc.returncode})")
+        print(
+            f"[prepare_receive] Receiver on port {p} exited "
+            f"(returncode={proc.returncode})"
+        )
+
+        # ── NEW: push UI notification to sender (fire-and-forget) ────────────
+        # Runs in its own daemon thread so it can never block the watcher.
+        def _push_notification():
+            if not s_ip or not t_id:
+                return
+            try:
+                requests.post(
+                    f"http://{s_ip}:5000/file_received",
+                    json={
+                        "task_id":  t_id,
+                        "filename": fname,
+                        "success":  success,
+                    },
+                    timeout=3,
+                )
+                print(
+                    f"[push] → {s_ip}/file_received  task={t_id[:8]}  "
+                    f"file='{fname}'  ok={success}"
+                )
+            except Exception as e:
+                # Best-effort only — never propagate
+                print(f"[push] /file_received notification failed (non-fatal): {e}")
+            finally:
+                with _job_map_lock:
+                    _job_sender_map.pop(jid, None)
+
+        threading.Thread(target=_push_notification, daemon=True).start()
 
     threading.Thread(
-        target=_watch_receiver, args=(quic_port, spawned_proc), daemon=True
+        target=_watch_receiver,
+        args=(quic_port, spawned_proc, job_id, sender_ip, task_id_hint, filename),
+        daemon=True,
     ).start()
 
     return jsonify({
         "status":        "ready",
         "receiver_port": quic_port,
         "save_path":     save_path,
+        "job_id":        job_id,   # per-file identifier for the push side-channel
     }), 200
 
 
