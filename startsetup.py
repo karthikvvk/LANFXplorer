@@ -4,6 +4,7 @@ import os
 import platform
 import re, subprocess
 import sys
+import ipaddress
 from pathlib import Path
 
 # CRITICAL: Set up paths FIRST, before importing any local modules
@@ -38,6 +39,23 @@ certi = os.path.join(pwd, "cert.pem")
 dest_host = ""
 reciv_host = "0.0.0.0"
 ca_cert = os.path.join(pwd, "ca_cert.pem")
+
+# ───────────────────────────────────────────────────────────────────────────
+# GLOBAL STATE CALL ORDER
+# This module uses mutable globals as a configuration database.
+# The required call order is:
+#
+#   1. detect_interface()         — populates: interface, ethernet_interface, wifi_interface
+#   2. get_network_info()         — populates: host_ip, cidr, subnet, gateway, broadcast_address
+#   3. write_env() / load_env_vars() — reads all of the above
+#
+# Violating this order (e.g. calling get_network_info before detect_interface) results in
+# interface being None and possible fallback to the wrong IP.
+#
+# Long-term fix: replace these globals with a NetworkContext dataclass so the ordering
+# dependency is expressed in function signatures rather than hidden state.
+# ───────────────────────────────────────────────────────────────────────────
+
 
 def detect_interface():
     global host_ip, cidr, interface, ethernet_interface, wifi_interface, system_type, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
@@ -100,7 +118,10 @@ def detect_interface():
             raise Exception("[-] No Ethernet interface found")
 
 def _get_iface_ip(iface: str):
-    """Return (ip_str, cidr_str) for *iface*, or (None, None) if no IPv4 is assigned."""
+    """Return (ip_str, cidr_str) for *iface*, or (None, None) if no IPv4 is assigned.
+
+    Populates: host_ip, cidr (indirectly via callers)
+    """
     try:
         out = subprocess.check_output(["ip", "-o", "-4", "addr", "show", iface], text=True)
         m = re.search(r'inet\s+([\d\.]+)/(\d+)', out)
@@ -112,19 +133,22 @@ def _get_iface_ip(iface: str):
 
 
 def _fill_network_from_ip(ip: str, cidr_str: str = "24"):
-    """Populate global subnet / gateway / broadcast derived from a known *ip*/*cidr_str*."""
+    """Populate global subnet / gateway / broadcast derived from a known *ip*/*cidr_str*.
+
+    Populates: host_ip, cidr, subnet, gateway, broadcast_address
+
+    NOTE: gateway is assumed to be the first host in the network (network+1, e.g. .1 for /24).
+    This is a common convention for home routers but is NOT derivable from the subnet alone.
+    LANFXplorer is a P2P tool and does not route through the gateway; this value is informational.
+    """
     global host_ip, cidr, subnet, gateway, broadcast_address
     host_ip = ip
     cidr = cidr_str
-    mask_int = (0xFFFFFFFF << (32 - int(cidr))) & 0xFFFFFFFF
-    subnet = socket.inet_ntoa(struct.pack("!I", mask_int))
-    ip_int    = struct.unpack("!I", socket.inet_aton(host_ip))[0]
-    subnet_int = struct.unpack("!I", socket.inet_aton(subnet))[0]
-    network_int   = ip_int & subnet_int
-    broadcast_int = network_int | (~subnet_int & 0xFFFFFFFF)
-    gateway_int   = network_int + 1
-    gateway           = socket.inet_ntoa(struct.pack("!I", gateway_int))
-    broadcast_address = socket.inet_ntoa(struct.pack("!I", broadcast_int))
+    net = ipaddress.IPv4Network(f"{host_ip}/{cidr}", strict=False)
+    subnet            = str(net.netmask)
+    broadcast_address = str(net.broadcast_address)
+    hosts = list(net.hosts())
+    gateway = str(hosts[0]) if hosts else str(net.network_address)
 
 
 def _check_p2p_connection():
@@ -203,74 +227,66 @@ def _force_apply_profile_ip(iface: str, new_ip: str, cidr: str, old_ip: str = No
 
 
 def get_network_info():
+    """Determine host IP and network parameters.
+
+    Populates: host_ip, cidr, subnet, gateway, broadcast_address
+
+    Call order: must be called AFTER detect_interface() so that *interface* is set.
+
+    IP selection priority:
+      1. Interface-aware: read the IP directly from the selected *interface* via `ip addr`.
+         This is correct for P2P/dual-NIC setups where the P2P Ethernet address matters.
+      2. Routing-aware fallback: connect a UDP socket to 8.8.8.8 to let the kernel pick
+         the address on the default-route interface.  This is a common trick but can return
+         the wrong IP (WiFi instead of Ethernet) on dual-NIC hosts.
+    """
     global host_ip, cidr, interface, system_type, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert
 
+    # ── 1. Interface-aware (preferred) ───────────────────────────────────────────────
+    if interface:
+        iface_ip, iface_cidr = _get_iface_ip(interface)
+        if iface_ip:
+            _fill_network_from_ip(iface_ip, iface_cidr or "24")
+            return {
+                "HOST": host_ip,
+                "SUBNET": subnet,
+                "CIDR": cidr,
+                "GATEWAY": gateway,
+                "BROADCAST": broadcast_address,
+            }
 
+    # ── 2. Routing-aware fallback (8.8.8.8 trick) ─────────────────────────────────
+    # WARNING: On dual-NIC hosts this returns the IP on the default-route interface,
+    # which may be WiFi rather than the intended P2P Ethernet interface.
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("8.8.8.8", 80))
-        host_ip = s.getsockname()[0]
+        fallback_ip = s.getsockname()[0]
     except Exception:
-
-        try:
-            if interface:
-                out = subprocess.check_output(["ip", "-o", "addr", "show", interface], text=True)
-
-                m = re.search(r'inet\s+([\d\.]+)/(\d+)\s+brd\s+([\d\.]+)', out)
-                if m:
-                    host_ip = m.group(1)
-                    cidr = m.group(2)
-                    broadcast_address = m.group(3)
-        except Exception:
-            pass
+        fallback_ip = None
     finally:
         s.close()
 
-    if not host_ip:
-        raise Exception("[-] Unable to determine host IP")
-
-
-    if not cidr:
-        ip_parts = list(map(int, host_ip.split('.')))
+    if fallback_ip:
+        # Derive CIDR from address class (best-effort; no interface info available)
+        ip_parts = list(map(int, fallback_ip.split('.')))
         if ip_parts[0] == 10:
-            cidr = "8"
-            subnet = "255.0.0.0"
+            fallback_cidr = "8"
         elif ip_parts[0] == 172 and 16 <= ip_parts[1] <= 31:
-            cidr = "16"
-            subnet = "255.255.0.0"
-        elif ip_parts[0] == 192 and ip_parts[1] == 168:
-            cidr = "24"
-            subnet = "255.255.255.0"
+            fallback_cidr = "16"
         else:
-            cidr = "24"
-            subnet = "255.255.255.0"
-    else:
+            fallback_cidr = "24"
+        _fill_network_from_ip(fallback_ip, fallback_cidr)
+        return {
+            "HOST": host_ip,
+            "SUBNET": subnet,
+            "CIDR": cidr,
+            "GATEWAY": gateway,
+            "BROADCAST": broadcast_address,
+        }
 
-        mask_int = (0xFFFFFFFF << (32 - int(cidr))) & 0xFFFFFFFF
-        subnet = socket.inet_ntoa(struct.pack("!I", mask_int))
+    raise Exception("[-] Unable to determine host IP")
 
-
-    ip_int = struct.unpack("!I", socket.inet_aton(host_ip))[0]
-    subnet_int = struct.unpack("!I", socket.inet_aton(subnet))[0]
-    network_int = ip_int & subnet_int
-    broadcast_int = network_int | (~subnet_int & 0xFFFFFFFF)
-    gateway_int = network_int + 1
-
-    gateway = socket.inet_ntoa(struct.pack("!I", gateway_int))
-    broadcast = socket.inet_ntoa(struct.pack("!I", broadcast_int))
-
-
-    gateway = gateway
-    broadcast_address = broadcast
-
-
-    return {
-        "HOST": host_ip,
-        "SUBNET": subnet,
-        "CIDR": cidr,
-        "GATEWAY": gateway,
-        "BROADCAST": broadcast
-    }
 
 def load_env_vars():
 
@@ -363,112 +379,9 @@ def write_env(installer=False):
     has_eth  = None #ethernet_interface is not None
     has_wifi = wifi_interface is not None
 
-    # if has_eth:
-    #     interface = ethernet_interface
-    #     p2p_status = _check_p2p_connection()
-    #     eth_ip,  eth_cidr = None, "24"
-
-    #     if p2p_status == "active":
-    #         # Profile is running — grab the LIVE IP from the interface.
-    #         eth_ip, eth_cidr = _get_iface_ip(ethernet_interface)
-
-    #         # IMPORTANT: Also read the STORED profile IP.  If they differ it means
-    #         # `nmcli con modify` was run but `nmcli con up` was never completed
-    #         # (e.g. it was killed because no peer was connected at the time).
-    #         # In that case, force-apply the profile IP immediately via `ip addr`
-    #         # so the app starts with the correct intended address.
-    #         profile_ip, profile_cidr = _get_profile_ip("p2p-link")
-    #         if profile_ip and eth_ip and profile_ip != eth_ip:
-    #             print(f"[!] Profile IP ({profile_ip}) ≠ live IP ({eth_ip}) — applying profile IP now...")
-    #             _force_apply_profile_ip(ethernet_interface, profile_ip,
-    #                                     profile_cidr or eth_cidr or "24",
-    #                                     old_ip=eth_ip)
-    #             eth_ip   = profile_ip
-    #             eth_cidr = profile_cidr or eth_cidr or "24"
-
-    #         if eth_ip:
-    #             print(f"[+] p2p-link active — using {eth_ip}")
-    #         else:
-    #             # Activated but IP not visible yet — treat as inactive
-    #             print("[!] p2p-link active but IP not visible — re-activating...")
-    #             p2p_status = "inactive"
-
-    #     if p2p_status == "inactive":        # separate `if` allows fall-through from above
-    #         print("[!] p2p-link exists but is down — bringing it up...")
-    #         subprocess.run(
-    #             ["nmcli", "con", "up", "p2p-link"],
-    #             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    #         )
-    #         # Poll until the IP appears (up to 10 s)
-    #         import time as _t
-    #         deadline = _t.time() + 10
-    #         while _t.time() < deadline:
-    #             eth_ip, eth_cidr = _get_iface_ip(ethernet_interface)
-    #             if eth_ip:
-    #                 break
-    #             _t.sleep(0.5)
-    #         if eth_ip:
-    #             print(f"[+] p2p-link brought up — using {eth_ip}")
-    #         else:
-    #             raise RuntimeError(
-    #                 f"p2p-link activated but no IP appeared on {ethernet_interface}")
-
-    #     elif p2p_status == "missing":
-    #         # No profile at all — run ping-scan + create nmcli p2p-link
-    #         if has_wifi:
-    #             print("[!] No p2p-link (WiFi active) — scanning + creating P2P profile...")
-    #         else:
-    #             print("[!] No p2p-link — scanning + creating P2P profile...")
-    #         from set_static_ip import assign_static_ip
-    #         chosen = assign_static_ip(interface_override=ethernet_interface)
-    #         if not chosen:
-    #             raise RuntimeError("Could not assign a static IP on Ethernet")
-    #         eth_ip, eth_cidr = chosen, "24"
-
-    #     _fill_network_from_ip(eth_ip, eth_cidr or "24")
-    #     if has_wifi:
-    #         print(f"[+] Ethernet + WiFi — P2P on {eth_ip} (WiFi stays active)")
-
-    # elif has_wifi:
-    #     # ── WiFi only — use existing network config, no static IP needed ──────
-    #     print("[+] WiFi-only mode — using existing network configuration")
-    #     get_network_info()
-
-    try:
-        get_network_info()
-    except Exception as _net_err:
-        _err_msg = "No network interface found (no Ethernet, no WiFi).\n\nLANFXplorer cannot start without a network connection.\nPlease connect to a network and try again."
-        # ── Show a system error popup ──────────────────────────────────────
-        try:
-            import tkinter as _tk
-            from tkinter import messagebox as _mb
-            _root = _tk.Tk()
-            _root.withdraw()          # hide the blank root window
-            _root.attributes("-topmost", True)
-            _mb.showerror(
-                title="LANFXplorer — Network Error",
-                message=_err_msg,
-                parent=_root,
-            )
-            _root.destroy()
-        except Exception:
-            # Fallback: try zenity (GTK) if tkinter is unavailable
-            try:
-                import subprocess as _sp
-                _sp.run(
-                    ["zenity", "--error",
-                     "--title=LANFXplorer — Network Error",
-                     f"--text={_err_msg}",
-                     "--width=400"],
-                    timeout=30,
-                )
-            except Exception:
-                pass  # No GUI available — error will still propagate below
-        # ───────────────────────────────────────────────────────────────────
-        raise RuntimeError("[-] No network interface found (no Ethernet, no WiFi) — cannot start") from _net_err
-   
     # Ensure Lanfxplorer directory exists and use it for OUTDIR/SRCDIR
     secure_root = ensure_lanfxplorer_directory()
+
     
     env_vars = {
         "HOST": host_ip,
@@ -594,3 +507,4 @@ def setup_pki_and_write_env():
 
 if __name__ == "__main__":
     write_env()
+

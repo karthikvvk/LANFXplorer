@@ -8,6 +8,7 @@ Supports two run modes:
     notifies systemd via sd_notify, and blocks until SIGTERM.
 """
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -23,6 +24,124 @@ import signal
 import threading
 
 from startsetup import write_env
+
+# ── PID-file directory ────────────────────────────────────────────────────────
+# Stores one JSON file per managed subprocess:
+#   { "pid": <int>, "started": <float epoch> }
+# Files survive crashes; they are cleaned up on normal shutdown.
+_PID_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "lanfxplorer"
+
+# Script stem → PID file name
+_PID_FILES = {
+    "receive.py":    _PID_DIR / "receiver.pid",
+    "api_bridge.py": _PID_DIR / "api.pid",
+}
+
+
+def _write_pid(script_name: str, proc: subprocess.Popen) -> None:
+    """Write {pid, started} to the PID file for *script_name*."""
+    pid_path = _PID_FILES.get(script_name)
+    if pid_path is None:
+        return
+    try:
+        _PID_DIR.mkdir(parents=True, exist_ok=True)
+        # Read process start time from /proc (Linux) for reuse-proof verification.
+        started = _get_proc_start_time(proc.pid)
+        pid_path.write_text(json.dumps({"pid": proc.pid, "started": started}))
+    except Exception as exc:
+        print_status("warn", f"Could not write PID file for {script_name}: {exc}")
+
+
+def _delete_pid(script_name: str) -> None:
+    """Delete the PID file for *script_name* (called on clean shutdown)."""
+    pid_path = _PID_FILES.get(script_name)
+    if pid_path and pid_path.exists():
+        try:
+            pid_path.unlink()
+        except Exception:
+            pass
+
+
+def _get_proc_start_time(pid: int) -> float:
+    """
+    Return process start time as a float (seconds since boot on Linux,
+    or 0.0 if unavailable).  Used to detect PID reuse.
+    """
+    try:
+        # Linux: /proc/<pid>/stat field 22 is start-time in clock ticks
+        stat = Path(f"/proc/{pid}/stat").read_text()
+        # Field 22 is after the comm field which may contain spaces/parens
+        after_comm = stat[stat.rfind(")") + 2:]
+        fields = after_comm.split()
+        ticks = int(fields[19])   # index 19 = field 22 (0-indexed from after comm)
+        clk_tck = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
+        return ticks / clk_tck
+    except Exception:
+        pass
+    try:
+        # Cross-platform fallback via psutil (optional dep)
+        import psutil
+        return psutil.Process(pid).create_time()
+    except Exception:
+        return 0.0
+
+
+def _kill_from_pid_file(script_name: str) -> None:
+    """
+    Read the PID file for *script_name*, verify the process still belongs
+    to us (by cmdline + start-time), then terminate it.
+
+    Verification prevents killing an unrelated process that reused the PID.
+    """
+    pid_path = _PID_FILES.get(script_name)
+    if pid_path is None or not pid_path.exists():
+        return
+
+    try:
+        data = json.loads(pid_path.read_text())
+        pid = int(data["pid"])
+        stored_started = float(data.get("started", 0))
+    except Exception as exc:
+        print_status("warn", f"Bad PID file for {script_name}: {exc}")
+        return
+
+    if pid <= 0:
+        return
+
+    # ── Verify cmdline still looks like our script ────────────────────────────
+    try:
+        cmdline_path = Path(f"/proc/{pid}/cmdline")
+        if cmdline_path.exists():
+            cmdline = cmdline_path.read_bytes().replace(b"\x00", b" ").decode(errors="replace")
+            stem = script_name  # e.g. "receive.py"
+            if stem not in cmdline:
+                print_status("warn", f"PID {pid} cmdline does not contain '{stem}' — skipping kill")
+                return
+        # else: /proc not available (non-Linux), skip cmdline check
+    except Exception:
+        pass
+
+    # ── Verify start-time to catch PID reuse ─────────────────────────────────
+    current_started = _get_proc_start_time(pid)
+    if stored_started and current_started and abs(current_started - stored_started) > 1.0:
+        print_status("warn", f"PID {pid} start-time mismatch (PID reuse detected) — skipping kill")
+        return
+
+    # ── Terminate ─────────────────────────────────────────────────────────────
+    try:
+        if platform.system().lower() != "windows":
+            # Kill the entire process group so MsQuic child processes also die
+            try:
+                pgid = os.getpgid(pid)
+                os.killpg(pgid, signal.SIGTERM)
+                print_status("info", f"Sent SIGTERM to process group {pgid} ({script_name})")
+            except ProcessLookupError:
+                pass   # process already gone
+        else:
+            os.kill(pid, signal.SIGTERM)
+            print_status("info", f"Sent SIGTERM to PID {pid} ({script_name})")
+    except Exception as exc:
+        print_status("warn", f"Could not kill {script_name} (PID {pid}): {exc}")
 
 # ── systemd sd_notify helper ──────────────────────────────────────────────────
 def _sd_notify(state: str) -> None:
@@ -75,36 +194,26 @@ def cleanup_existing_services():
         except Exception as e:
             print_status("warn", f"Could not stop service (non-fatal): {e}")
 
-    # ── Kill any remaining python processes still holding our ports ───────────
-    try:
-        result = subprocess.run(["ss", "-tunlp"], capture_output=True, text=True, timeout=10)
-        pids_to_kill = set()
+    # ── Kill previous instances via PID files ─────────────────────────────────
+    # PID files are written by run_script() below and contain {pid, started}.
+    # Verification ensures we only kill our own processes — not a different
+    # program that happened to reuse the same PID (PID-reuse defence).
+    for script_name in list(_PID_FILES):
+        _kill_from_pid_file(script_name)
 
-        for line in result.stdout.splitlines():
-            for port in ["4433", "4434", "4435", "4436", "4437", "5000"]:
-                if f":{port}" in line and "python" in line.lower():
-                    import re
-                    match = re.search(r'pid=(\d+)', line)
-                    if match:
-                        pids_to_kill.add(int(match.group(1)))
-
-        current_pid = os.getpid()
-        for pid in pids_to_kill:
-            if pid != current_pid:
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                    print_status("info", f"Killed stale PID {pid}")
-                except Exception:
-                    pass
-
-        if pids_to_kill:
-            time.sleep(1)
-
-    except Exception:
-        pass
+    # Brief pause so freed ports are available before we re-bind.
+    time.sleep(0.5)
 
 
 def run_script(script_name: str, wait: bool = True):
+    """
+    Launch *script_name* as a subprocess.
+
+    Background processes (wait=False) are started in a new process group so
+    that killing the group also terminates any grandchildren (e.g. the MsQuic
+    binary spawned by receive.py).  Their stdout/stderr are redirected to
+    separate log files under APP_DIR/logs/.
+    """
     script_path = APP_DIR / script_name
     if not script_path.exists():
         print_status("fail", f"Missing: {script_name}")
@@ -112,20 +221,58 @@ def run_script(script_name: str, wait: bool = True):
 
     print_status("run", f"Starting {script_name}")
 
-    proc = subprocess.Popen(
-        [sys.executable, str(script_path)],
-        cwd=str(APP_DIR),
-    )
+    _system = platform.system().lower()
 
     if wait:
+        # Foreground scripts (startsetup.py) share the terminal — no special flags.
+        proc = subprocess.Popen(
+            [sys.executable, str(script_path)],
+            cwd=str(APP_DIR),
+        )
         proc.wait()
         if proc.returncode != 0:
             return None
-    else:
-        time.sleep(1)
-        if proc.poll() is not None:
-            return None
+        return proc
 
+    # ── Background subprocess setup ───────────────────────────────────────────
+    # Redirect to a dedicated log file so all three processes don't interleave
+    # on the same terminal (makes debugging significantly easier).
+    log_dir = APP_DIR / "logs"
+    log_dir.mkdir(exist_ok=True)
+    stem = Path(script_name).stem          # "receive" or "api_bridge"
+    log_fh = open(log_dir / f"{stem}.log", "a", buffering=1)  # line-buffered
+
+    popen_kwargs = dict(
+        cwd=str(APP_DIR),
+        stdout=log_fh,
+        stderr=log_fh,
+    )
+
+    if _system != "windows":
+        # start_new_session=True puts the process in its own session/process-group.
+        # os.killpg() on shutdown then kills the entire tree (including MsQuic).
+        popen_kwargs["start_new_session"] = True
+    else:
+        # On Windows, CREATE_NEW_PROCESS_GROUP allows sending CTRL_BREAK_EVENT
+        # to the process group for clean shutdown.
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+
+    proc = subprocess.Popen(
+        [sys.executable, str(script_path)],
+        **popen_kwargs,
+    )
+
+    # Brief health-check: if process exits immediately it's a hard failure.
+    time.sleep(1)
+    if proc.poll() is not None:
+        print_status("fail", f"{script_name} exited immediately (rc={proc.returncode}). "
+                             f"Check logs/{stem}.log")
+        return None
+
+    # Persist PID + start-time so cleanup_existing_services() can find and
+    # kill this process precisely on the next startup.
+    _write_pid(script_name, proc)
+    print_status("info", f"{script_name} running (PID {proc.pid}) → logs/{stem}.log")
     return proc
 
 
@@ -154,11 +301,15 @@ def elevate_and_run(script_path: str):
             display = os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
 
             # ── 1. pkexec (BEST) ──
+            # Use subprocess.run() with a list — never os.system() with an f-string.
+            # os.system() passes the command through /bin/sh, making it vulnerable
+            # to shell injection if script_path contains spaces or special characters.
             if shutil.which("pkexec"):
                 print_status("run", "Using pkexec (GUI auth)")
-                print(f"pkexec {sys.executable} {script_path} --install")
-                res = os.system(f"pkexec {sys.executable} {script_path} --install")
-                # elevated_ok = (res.returncode == 0)
+                res = subprocess.run(
+                    ["pkexec", sys.executable, str(script_path), "--install"]
+                )
+                elevated_ok = (res.returncode == 0)
 
             # ── 2. GUI password prompt ──
             elif display and (shutil.which("zenity") or shutil.which("kdialog")):
@@ -177,9 +328,8 @@ def elevate_and_run(script_path: str):
 
                 if pw.returncode == 0:
                     password = pw.stdout.strip()
-
                     res = subprocess.run(
-                        ["sudo", "-S", sys.executable, script_path, "--install"],
+                        ["sudo", "-S", sys.executable, str(script_path), "--install"],
                         input=password + "\n",
                         text=True
                     )
@@ -191,7 +341,7 @@ def elevate_and_run(script_path: str):
             else:
                 print_status("warn", "Falling back to terminal sudo")
                 res = subprocess.run(
-                    ["sudo", sys.executable, script_path, "--install"]
+                    ["sudo", sys.executable, str(script_path), "--install"]
                 )
                 elevated_ok = (res.returncode == 0)
 
@@ -380,16 +530,43 @@ def main():
         _shutdown.wait()  # Block until SIGTERM / SIGINT
 
     print_status("info", "Shutdown")
-    # Terminate child processes (receiver, api_bridge) if still alive
+    _system = platform.system().lower()
+
+    # Terminate child processes (receiver, api_bridge) and their entire process
+    # groups (which include grandchildren like the MsQuic binary).
     for child_name, child_proc in (("receive.py", receiver), ("api_bridge.py", api)):
         if child_proc and child_proc.poll() is None:
             print_status("info", f"Stopping {child_name} (PID {child_proc.pid})")
-            child_proc.terminate()
+            try:
+                if _system != "windows":
+                    # Kill the whole process group — terminates MsQuic grandchildren too
+                    try:
+                        pgid = os.getpgid(child_proc.pid)
+                        os.killpg(pgid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    # Windows: send CTRL_BREAK_EVENT to the process group
+                    child_proc.send_signal(signal.CTRL_BREAK_EVENT)
+            except Exception:
+                child_proc.terminate()   # fallback
             try:
                 child_proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                child_proc.kill()
+                try:
+                    if _system != "windows":
+                        os.killpg(os.getpgid(child_proc.pid), signal.SIGKILL)
+                    else:
+                        child_proc.kill()
+                except Exception:
+                    pass
+        # Clean up PID file on successful shutdown
+        _delete_pid(child_name)
 
 
 if __name__ == "__main__":
     main()
+
+# TODO(netlink): wait_for_interface_ready() currently polls via subprocess every 0.5 s.
+# A cleaner Linux alternative is pyroute2 Netlink — the kernel notifies on interface/IP
+# change events with no polling required. Acceptable as-is for now.

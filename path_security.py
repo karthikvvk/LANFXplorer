@@ -6,8 +6,9 @@ This module is the single source of truth for path security across the applicati
 
 Security Rules:
 - Only paths within $HOME/Lanfxplorer are allowed (case-sensitive)
-- Path traversal (../) is blocked
+- Path traversal (../) is blocked, including via symlinks (os.path.realpath used)
 - Minimum depth of 3 levels required (/home/user/something)
+- Maximum depth capped to prevent DoS via deep nested directory creation
 """
 
 import os
@@ -17,6 +18,13 @@ import getpass
 
 # The exact directory name - case-sensitive
 LANFXPLORER_DIR_NAME = "Lanfxplorer"
+
+# Path depth limits
+# Minimum: 3 parts after split (e.g. ['home', 'user', 'Lanfxplorer'])
+MIN_PATH_DEPTH: int = 3
+# Maximum: prevents DoS via pathologically deep nested directory creation
+MAX_PATH_DEPTH: int = 20
+
 
 
 def get_home_directory() -> str:
@@ -57,7 +65,8 @@ def is_path_at_minimum_depth(path: str) -> bool:
     """
     Check if path is at minimum required depth.
     Paths at /home/user level or above are NOT allowed.
-    Must be at least /home/user/something (3 levels deep).
+    Must be at least /home/user/something (MIN_PATH_DEPTH levels deep).
+    Also rejects paths that are suspiciously deep (> MAX_PATH_DEPTH).
     
     Examples:
         /home/user          -> False (too shallow)
@@ -69,19 +78,23 @@ def is_path_at_minimum_depth(path: str) -> bool:
         path: Path to check
         
     Returns:
-        True if path is at minimum depth, False otherwise
+        True if path is at valid depth, False otherwise
     """
     normalized = os.path.normpath(os.path.abspath(path))
     parts = [p for p in normalized.split(os.sep) if p]
-    
-    # Must have at least 3 parts: e.g., ['home', 'user', 'something']
-    return len(parts) >= 3
+    depth = len(parts)
+    return MIN_PATH_DEPTH <= depth <= MAX_PATH_DEPTH
 
 
 def is_path_within_root(requested_path: str, root_path: str = None) -> bool:
     """
     Check if requested_path is within or equal to root_path.
-    Handles path traversal attempts like '../'.
+    Handles path traversal AND symlink escapes by using os.path.realpath(),
+    which resolves all symlinks before comparison.
+    
+    Example attack this blocks:
+        ~/Lanfxplorer/escape -> /etc/   (symlink)
+        normpath would see it as inside root; realpath resolves to /etc/.
     
     Args:
         requested_path: The path being requested
@@ -93,15 +106,22 @@ def is_path_within_root(requested_path: str, root_path: str = None) -> bool:
     if root_path is None:
         root_path = get_lanfxplorer_root()
     
-    # Normalize and get absolute paths
-    requested_abs = os.path.normpath(os.path.abspath(requested_path))
-    root_abs = os.path.normpath(os.path.abspath(root_path))
+    # For paths that don't exist yet (e.g. a new incoming file), resolve the
+    # *parent* directory (which must exist) and re-append the filename so that
+    # realpath() can follow all symlinks up to the deepest existing ancestor.
+    def _safe_realpath(p: str) -> str:
+        p_abs = os.path.abspath(p)
+        if os.path.exists(p_abs):
+            return os.path.realpath(p_abs)
+        parent = os.path.realpath(os.path.dirname(p_abs))
+        return os.path.join(parent, os.path.basename(p_abs))
+
+    requested_real = _safe_realpath(requested_path)
+    root_real      = _safe_realpath(root_path)
     
-    # Check if requested path starts with root path
-    # We add os.sep to prevent /home/user/test matching /home/user/testing
-    if requested_abs == root_abs:
+    if requested_real == root_real:
         return True
-    return requested_abs.startswith(root_abs + os.sep)
+    return requested_real.startswith(root_real + os.sep)
 
 
 def validate_path_access(path: str) -> tuple:
