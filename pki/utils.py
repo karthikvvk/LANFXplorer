@@ -10,6 +10,12 @@ from datetime import datetime, timezone
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 
+# ── Certificate validity constants (Fix 4.8) ─────────────────────────────────
+# CA certs are long-lived (10 years); they sign short-lived leaf certs.
+# Shorter leaf validity limits blast-radius if a leaf key is compromised.
+CA_CERT_VALIDITY_DAYS     = 3650   # 10 years — standard for a local network CA
+CLIENT_CERT_VALIDITY_DAYS = 90     # 90 days  — short-lived leaf certs
+
 
 def load_cert_pem(path_or_pem: str) -> bytes:
     """Load certificate PEM from a file path or return the given PEM string as bytes.
@@ -201,7 +207,7 @@ def generate_csr(private_key_pem: bytes, common_name: str, san_dns: Optional[Lis
     return csr.public_bytes(serialization.Encoding.PEM)
 
 
-def sign_csr(csr_pem: bytes, ca_cert_pem: bytes, ca_key_pem: bytes, days: int = 365) -> bytes:
+def sign_csr(csr_pem: bytes, ca_cert_pem: bytes, ca_key_pem: bytes, days: int = CLIENT_CERT_VALIDITY_DAYS) -> bytes:
     """Sign a CSR using the CA certificate and key.
     
     :param csr_pem: CSR bytes (PEM)

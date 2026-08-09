@@ -84,3 +84,4 @@ c_ver/build/*
 .prompt_attachments
 *.hologram.dart
 Notes.md
+test.py

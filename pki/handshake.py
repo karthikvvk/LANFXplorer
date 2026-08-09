@@ -144,8 +144,17 @@ class _AuthHandler(socketserver.BaseRequestHandler):
         password = msg.get("password", "")
         fp = (msg.get("fp") or "").lower() or None
 
-        # Check if peer is already rejected
         peer_store = PeerStore()
+
+        # ── Fix 4.3: Enforce revocation FIRST ────────────────────────────────
+        # is_revoked() exists in PeerStore but was never called here — revoked
+        # peers could authenticate successfully. Now enforced before any other check.
+        if fp and peer_store.is_revoked(fp):
+            sock.sendall(_encode_json_legacy({"status": "AUTH_FAIL", "reason": "revoked"}))
+            logger.info(f"[HandshakeService] Revoked peer {fp[:8]}... blocked")
+            return
+
+        # Check if peer is already rejected
         if fp:
             rec = peer_store.get_peer(fp)
             if rec and rec.get("status") == "rejected":
@@ -162,11 +171,14 @@ class _AuthHandler(socketserver.BaseRequestHandler):
             sock.sendall(_encode_json_legacy({"status": "AUTH_FAIL", "reason": "no_password_set"}))
             return
 
+        # ── Fix 4.9: Architecture note (Phase 3A current state) ──────────────
+        # Current: password is the identity check; certificate fingerprint is informational.
+        # Phase 3B (next): require fp to exist in PeerStore as "trusted" before auth succeeds.
+        # Phase 3C (future): certificate alone authenticates; password becomes transfer approval.
         import hmac
         if hmac.compare_digest(password.encode(), expected.encode()):
             if fp:
                 # Ensure the peer record exists before approving.
-                # On first-time auth no cert was stored, so add a stub entry.
                 if peer_store.get_peer(fp) is None:
                     peer_store._data[fp] = {
                         "fingerprint": fp,
@@ -185,6 +197,7 @@ class _AuthHandler(socketserver.BaseRequestHandler):
         else:
             logger.warning(f"[HandshakeService] Wrong password from {peer}")
             sock.sendall(_encode_json_legacy({"status": "AUTH_FAIL", "reason": "invalid_password"}))
+
 
 
 # ---------------------------------------------------------------------------

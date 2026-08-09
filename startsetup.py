@@ -344,6 +344,7 @@ def load_env_vars():
 def write_env(installer=False):
     global host_ip, cidr, interface, ethernet_interface, wifi_interface, system_type, pwd, user, certi, key, out_dir, src_dir, port, broadcast_address, gateway, subnet, dest_host, reciv_host, ca_cert,password
     detect_interface()
+    get_network_info()
     ls = os.listdir(pwd)
     if "key.pem" not in ls or "cert.pem" not in ls:
         # Use cryptography lib on ALL platforms — no standalone openssl binary needed.

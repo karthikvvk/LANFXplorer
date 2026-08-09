@@ -29,7 +29,6 @@ except:
 
 # Files and directories to include
 ITEMS = [
-    "32bitscreens",
     "binaries",
 
     "pki",
@@ -54,7 +53,6 @@ ITEMS = [
     "pubspec.lock",
     "pubspec.yaml",
     "quic_cli.py",
-    "README.md",
     "receive.py",
     "requirements.txt",
     "reset_env.py",
@@ -87,102 +85,102 @@ else:
 PYTHON_BUILD_DIR = os.path.join(ROOT, "python_build")
 
 
-def build_python_ui():
-    """
-    Use PyInstaller to compile the Tkinter-based Python UI
-    (32bitscreens/tkinter_app.py) into a standalone executable.
-    Build artifacts go into ./python_build (temporary).
-    Returns the path to the built executable, or None on failure.
-    """
-    entry_script = os.path.join(ROOT, "32bitscreens", "tkinter_app.py")
-    if not os.path.exists(entry_script):
-        print("[!] Python UI entry point not found, skipping PyInstaller build")
-        return None
+# def build_python_ui():
+#     """
+#     Use PyInstaller to compile the Tkinter-based Python UI
+#     (32bitscreens/tkinter_app.py) into a standalone executable.
+#     Build artifacts go into ./python_build (temporary).
+#     Returns the path to the built executable, or None on failure.
+#     """
+#     entry_script = os.path.join(ROOT, "32bitscreens", "tkinter_app.py")
+#     if not os.path.exists(entry_script):
+#         print("[!] Python UI entry point not found, skipping PyInstaller build")
+#         return None
 
-    base_dir = os.path.join(PYTHON_BUILD_DIR, "py_ui_64")
-    dist_dir = os.path.join(base_dir, "dist")
-    work_dir = os.path.join(base_dir, "work")
-    spec_dir = base_dir
+#     base_dir = os.path.join(PYTHON_BUILD_DIR, "py_ui_64")
+#     dist_dir = os.path.join(base_dir, "dist")
+#     work_dir = os.path.join(base_dir, "work")
+#     spec_dir = base_dir
 
-    # Collect all .py modules from 32bitscreens as hidden imports
-    screens_dir = os.path.join(ROOT, "32bitscreens")
-    hidden_imports = []
-    for fname in os.listdir(screens_dir):
-        if fname.endswith(".py") and fname != "__init__.py" and fname != "tkinter_app.py":
-            mod_name = fname[:-3]  # strip .py
-            hidden_imports.extend(["--hidden-import", mod_name])
+#     # Collect all .py modules from 32bitscreens as hidden imports
+#     screens_dir = os.path.join(ROOT, "32bitscreens")
+#     hidden_imports = []
+#     for fname in os.listdir(screens_dir):
+#         if fname.endswith(".py") and fname != "__init__.py" and fname != "tkinter_app.py":
+#             mod_name = fname[:-3]  # strip .py
+#             hidden_imports.extend(["--hidden-import", mod_name])
 
-    # Tkinter and its submodules (PyInstaller often misses these)
-    tkinter_imports = [
-        "tkinter",
-        "tkinter.ttk",
-        "tkinter.filedialog",
-        "tkinter.messagebox",
-        "tkinter.simpledialog",
-        "_tkinter",
-    ]
-    for pkg in tkinter_imports:
-        hidden_imports.extend(["--hidden-import", pkg])
+#     # Tkinter and its submodules (PyInstaller often misses these)
+#     tkinter_imports = [
+#         "tkinter",
+#         "tkinter.ttk",
+#         "tkinter.filedialog",
+#         "tkinter.messagebox",
+#         "tkinter.simpledialog",
+#         "_tkinter",
+#     ]
+#     for pkg in tkinter_imports:
+#         hidden_imports.extend(["--hidden-import", pkg])
 
-    # Third-party packages used by 32bitscreens (e.g. api_client uses requests)
-    third_party_imports = [
-        "requests",
-        "urllib3",
-        "charset_normalizer",
-        "certifi",
-        "idna",
-    ]
-    for pkg in third_party_imports:
-        hidden_imports.extend(["--hidden-import", pkg])
+#     # Third-party packages used by 32bitscreens (e.g. api_client uses requests)
+#     third_party_imports = [
+#         "requests",
+#         "urllib3",
+#         "charset_normalizer",
+#         "certifi",
+#         "idna",
+#     ]
+#     for pkg in third_party_imports:
+#         hidden_imports.extend(["--hidden-import", pkg])
 
-    # Find ALL site-packages directories where dependencies might live.
-    # The builder may run from a venv (e.g. "virtual/") that only has PyInstaller,
-    # while the actual app dependencies live in the system Python site-packages.
-    # We must tell PyInstaller where to find them.
-    extra_paths = []
-    seen_paths = set()
+#     # Find ALL site-packages directories where dependencies might live.
+#     # The builder may run from a venv (e.g. "virtual/") that only has PyInstaller,
+#     # while the actual app dependencies live in the system Python site-packages.
+#     # We must tell PyInstaller where to find them.
+#     extra_paths = []
+#     seen_paths = set()
 
-    def _add_path(p):
-        if os.path.isdir(p) and p not in seen_paths:
-            seen_paths.add(p)
-            extra_paths.extend(["--paths", p])
+#     def _add_path(p):
+#         if os.path.isdir(p) and p not in seen_paths:
+#             seen_paths.add(p)
+#             extra_paths.extend(["--paths", p])
 
-    # 1. System Python site-packages (primary — no more opt/python39)
-    try:
-        import site
-        for sp in site.getsitepackages():
-            _add_path(sp)
-        _add_path(site.getusersitepackages())
-    except Exception:
-        pass
+#     # 1. System Python site-packages (primary — no more opt/python39)
+#     try:
+#         import site
+#         for sp in site.getsitepackages():
+#             _add_path(sp)
+#         _add_path(site.getusersitepackages())
+#     except Exception:
+#         pass
 
-    cmd = [
-        sys.executable, "-m", "PyInstaller",
-        "--onefile",
-        "--name", "py_ui_64",
-        "--distpath", dist_dir,
-        "--workpath", work_dir,
-        "--specpath", spec_dir,
-        "--paths", screens_dir,
-        "--noconfirm",
-    ] + extra_paths + hidden_imports + [entry_script]
+#     cmd = [
+#         sys.executable, "-m", "PyInstaller",
+#         "--onefile",
+#         "--name", "py_ui_64",
+#         "--distpath", dist_dir,
+#         "--workpath", work_dir,
+#         "--specpath", spec_dir,
+#         "--paths", screens_dir,
+#         "--noconfirm",
+#     ] + extra_paths + hidden_imports + [entry_script]
 
-    print(f"[*] Building Python UI with PyInstaller...")
-    print(f"    Command: {' '.join(cmd)}")
+#     print(f"[*] Building Python UI with PyInstaller...")
+#     print(f"    Command: {' '.join(cmd)}")
 
-    result = subprocess.run(cmd, cwd=ROOT)
-    if result.returncode != 0:
-        print("[!] PyInstaller build failed! Do 'pip install pyinstaller' and try again")
-        exit()
-        return None
+#     result = subprocess.run(cmd, cwd=ROOT)
+#     if result.returncode != 0:
+#         print("[!] PyInstaller build failed! Do 'pip install pyinstaller' and try again")
+#         exit()
+#         return None
 
-    exe_path = os.path.join(dist_dir, PYTHON_UI_EXE_NAME)
-    if os.path.exists(exe_path):
-        print(f"[*] Python UI built successfully: {exe_path}")
-        return exe_path
-    else:
-        print(f"[!] Expected executable not found: {exe_path}")
-        return None
+#     exe_path = os.path.join(dist_dir, PYTHON_UI_EXE_NAME)
+#     if os.path.exists(exe_path):
+#         print(f"[*] Python UI built successfully: {exe_path}")
+#         return exe_path
+#     else:
+#         print(f"[!] Expected executable not found: {exe_path}")
+#         return None
 
 
 
@@ -454,32 +452,32 @@ def main():
     else:
         print(f"[!] Warning: Executable not found at {executable_src}")
 
-    # --- Build and include Python UI (PyInstaller) ---
-    python_ui_exe = build_python_ui()
+    # # --- Build and include Python UI (PyInstaller) ---
+    # python_ui_exe = build_python_ui()
 
-    # Destination folder for all py_ui binaries in the archive
-    python_ui_dest = os.path.join(APPBUILD, "py_ui_64")
-    os.makedirs(python_ui_dest, exist_ok=True)
+    # # Destination folder for all py_ui binaries in the archive
+    # python_ui_dest = os.path.join(APPBUILD, "py_ui_64")
+    # os.makedirs(python_ui_dest, exist_ok=True)
 
-    if python_ui_exe:
-        shutil.copy2(python_ui_exe, os.path.join(python_ui_dest, PYTHON_UI_EXE_NAME))
-        print(f"[*] Included Python UI executable in archive: {PYTHON_UI_EXE_NAME}")
-    else:
-        print("[!] Warning: Python UI executable not included in archive")
+    # if python_ui_exe:
+    #     shutil.copy2(python_ui_exe, os.path.join(python_ui_dest, PYTHON_UI_EXE_NAME))
+    #     print(f"[*] Included Python UI executable in archive: {PYTHON_UI_EXE_NAME}")
+    # else:
+    #     print("[!] Warning: Python UI executable not included in archive")
 
     # Pick up py_ui_32 if it was manually placed in binaries/
-    if SYSTEM.startswith("win"):
-        py_ui_32_src = os.path.join(ROOT, "binaries", "py_ui_32.exe")
-        py_ui_32_dst = os.path.join(python_ui_dest, "py_ui_32.exe")
-    else:
-        py_ui_32_src = os.path.join(ROOT, "binaries", "py_ui_32")
-        py_ui_32_dst = os.path.join(python_ui_dest, "py_ui_32")
+    # if SYSTEM.startswith("win"):
+    #     py_ui_32_src = os.path.join(ROOT, "binaries", "py_ui_32.exe")
+    #     py_ui_32_dst = os.path.join(python_ui_dest, "py_ui_32.exe")
+    # else:
+    #     py_ui_32_src = os.path.join(ROOT, "binaries", "py_ui_32")
+    #     py_ui_32_dst = os.path.join(python_ui_dest, "py_ui_32")
 
-    if os.path.exists(py_ui_32_src):
-        shutil.copy2(py_ui_32_src, py_ui_32_dst)
-        print(f"[*] Included py_ui_32 binary from binaries/ in archive")
-    else:
-        print("[i] py_ui_32 not found in binaries/ — skipping (drop it in manually on 32-bit machine)")
+    # if os.path.exists(py_ui_32_src):
+    #     shutil.copy2(py_ui_32_src, py_ui_32_dst)
+    #     print(f"[*] Included py_ui_32 binary from binaries/ in archive")
+    # else:
+    #     print("[i] py_ui_32 not found in binaries/ — skipping (drop it in manually on 32-bit machine)")
 
     # Cleanup temporary python_build directory
     if os.path.exists(PYTHON_BUILD_DIR):
